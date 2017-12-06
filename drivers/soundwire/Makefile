@@ -3,5 +3,5 @@
 #
 
 #Bus Objs
-soundwire-bus-objs := bus_type.o bus.o slave.o mipi_disco.o
+soundwire-bus-objs := bus_type.o bus.o slave.o mipi_disco.o sysfs.o
 obj-$(CONFIG_SOUNDWIRE_BUS) += soundwire-bus.o

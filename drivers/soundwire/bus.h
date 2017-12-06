@@ -16,6 +16,8 @@ static inline int sdw_acpi_find_slaves(struct sdw_bus *bus)
 void sdw_extract_slave_id(struct sdw_bus *bus,
 			u64 addr, struct sdw_slave_id *id);
 
+extern const struct attribute_group *sdw_slave_dev_attr_groups[];
+
 enum {
 	SDW_MSG_FLAG_READ = 0,
 	SDW_MSG_FLAG_WRITE,
