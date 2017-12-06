@@ -41,3 +41,7 @@ config REGMAP_IRQ
 
 config REGMAP_HWSPINLOCK
 	bool
+
+config REGMAP_SOUNDWIRE
+	tristate
+	depends on SOUNDWIRE_BUS

@@ -18,5 +18,6 @@ comment "SoundWire Devices"
 
 config SOUNDWIRE_BUS
 	tristate
+	select REGMAP_SOUNDWIRE
 
 endif
