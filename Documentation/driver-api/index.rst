@@ -47,6 +47,7 @@ available subsections can be seen below.
    gpio
    misc_devices
    dmaengine/index
+   soundwire/index
 
 .. only::  subproject and html
 
