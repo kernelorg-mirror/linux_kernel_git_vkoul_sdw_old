@@ -12695,6 +12695,16 @@ F:	Documentation/sound/alsa/soc/
 F:	sound/soc/
 F:	include/sound/soc*
 
+SOUNDWIRE SUBSYSTEM
+M:	Vinod Koul <vinod.koul@intel.com>
+M:	Sanyog Kale <sanyog.r.kale@intel.com>
+T:	git git://git.kernel.org/pub/scm/linux/kernel/git/vkoul/soundwire.git
+L:	linux-kernel@vger.kernel.org
+S:	Supported
+F:	Documentation/driver-api/soundwire/
+F:	drivers/soundwire/
+F:	include/linux/soundwire/
+
 SP2 MEDIA DRIVER
 M:	Olli Salonen <olli.salonen@iki.fi>
 L:	linux-media@vger.kernel.org
