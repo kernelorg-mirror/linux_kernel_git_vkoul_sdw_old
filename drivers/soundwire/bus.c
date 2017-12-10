@@ -763,19 +763,27 @@ static int sdw_handle_port_interrupt(struct sdw_slave *slave,
 
 static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 {
+	struct sdw_slave_intr_status slave_intr;
 	u8 clear = 0, bit, port_status[15];
 	int port_num, stat, ret, count = 0;
 	unsigned long port;
 	bool slave_notify = false;
-	u8 buf[3], buf2[3];
+	u8 buf, buf2[3];
 
 	sdw_modify_slave_status(slave, SDW_SLAVE_ALERT);
 
 	/* Read Instat 1, Instat 2 and Instat 3 registers */
-	ret = sdw_nread(slave, SDW_SCP_INT1, 3, buf);
+	ret = buf = sdw_read(slave, SDW_SCP_INT1);
 	if (ret < 0) {
 		dev_err(slave->bus->dev,
 					"SDW_SCP_INT1 read failed:%d", ret);
+		return ret;
+	}
+
+	ret = sdw_nread(slave, SDW_SCP_INTSTAT2, 3, buf2);
+	if (ret < 0) {
+		dev_err(slave->bus->dev,
+					"SDW_SCP_INT2/3 read failed:%d", ret);
 		return ret;
 	}
 
@@ -784,12 +792,12 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 		 * Check parity, bus clash and Slave (impl defined)
 		 * interrupt
 		 */
-		if (buf[0] & SDW_SCP_INT1_PARITY) {
+		if (buf & SDW_SCP_INT1_PARITY) {
 			dev_err(&slave->dev, "Parity error detected");
 			clear |= SDW_SCP_INT1_PARITY;
 		}
 
-		if (buf[0] & SDW_SCP_INT1_BUS_CLASH) {
+		if (buf & SDW_SCP_INT1_BUS_CLASH) {
 			dev_err(&slave->dev, "Bus clash error detected");
 			clear |= SDW_SCP_INT1_BUS_CLASH;
 		}
@@ -801,14 +809,14 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 		 * via sysfs property with bus reset being the default.
 		 */
 
-		if (buf[0] & SDW_SCP_INT1_IMPL_DEF) {
+		if (buf & SDW_SCP_INT1_IMPL_DEF) {
 			dev_dbg(&slave->dev, "Slave impl defined interrupt\n");
 			clear |= SDW_SCP_INT1_IMPL_DEF;
 			slave_notify = true;
 		}
 
-		/* Check port 0 - 4 interrupts */
-		port = buf[0] & SDW_SCP_INT1_PORT0_3;
+		/* Check port 0 - 3 interrupts */
+		port = buf & SDW_SCP_INT1_PORT0_3;
 
 		/* To get port number corresponding to bits, shift it */
 		port = port >> SDW_REG_SHIFT(SDW_SCP_INT1_PORT0_3);
@@ -819,8 +827,8 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 		}
 
 		/* Check if cascade 2 interrupt is present */
-		if (buf[0] & SDW_SCP_INT1_SCP2_CASCADE) {
-			port = buf[1] & SDW_SCP_INTSTAT2_PORT4_10;
+		if (buf & SDW_SCP_INT1_SCP2_CASCADE) {
+			port = buf2[0] & SDW_SCP_INTSTAT2_PORT4_10;
 			for_each_set_bit(bit, &port, 8) {
 				/* scp2 ports start from 4 */
 				port_num = bit + 3;
@@ -831,8 +839,8 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 		}
 
 		/* now check last cascade */
-		if (buf[1] & SDW_SCP_INTSTAT2_SCP3_CASCADE) {
-			port = buf[2] & SDW_SCP_INTSTAT3_PORT11_14;
+		if (buf2[0] & SDW_SCP_INTSTAT2_SCP3_CASCADE) {
+			port = buf2[1] & SDW_SCP_INTSTAT3_PORT11_14;
 			for_each_set_bit(bit, &port, 8) {
 				/* scp3 ports start from 11 */
 				port_num = bit + 10;
@@ -845,8 +853,6 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 		/* Update the Slave driver */
 		if (slave_notify && (slave->ops) &&
 					(slave->ops->interrupt_callback)) {
-			struct sdw_slave_intr_status slave_intr;
-
 			slave_intr.control_port = clear;
 			memcpy(slave_intr.port, &port_status,
 						sizeof(slave_intr.port));
@@ -864,17 +870,24 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 
 		/*
 		 * Read status again to ensure no new interrupts arrived
-		 * while servicing interrupts
+		 * while servicing interrupts.
 		 */
-		ret = sdw_nread(slave, SDW_SCP_INT1, 3, buf2);
+		ret = buf = sdw_read(slave, SDW_SCP_INT1);
 		if (ret < 0) {
 			dev_err(slave->bus->dev,
 					"SDW_SCP_INT1 read failed:%d", ret);
 			return ret;
 		}
 
+		ret = sdw_nread(slave, SDW_SCP_INTSTAT2, 2, buf2);
+		if (ret < 0) {
+			dev_err(slave->bus->dev,
+					"SDW_SCP_INT2/3 read failed:%d", ret);
+			return ret;
+		}
+
 		/* Make sure no interrupts are pending */
-		stat = buf[0] & buf2[0] || buf[1] & buf2[1] || buf[2] & buf2[2];
+		stat = buf & buf2[0] || buf & buf2[1] || buf & buf2[2];
 
 		/*
 		 * Exit loop if Slave is continuously in ALERT state even
@@ -908,6 +921,7 @@ static int sdw_update_slave_status(struct sdw_slave *slave,
 int sdw_handle_slave_status(struct sdw_bus *bus,
 			enum sdw_slave_status status[])
 {
+	enum sdw_slave_status prev_status;
 	struct sdw_slave *slave;
 	int i, ret = 0;
 
@@ -950,8 +964,23 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
 			if (slave->status == SDW_SLAVE_ATTACHED)
 				break;
 
-			sdw_initialize_slave(slave);
+			prev_status = slave->status;
 			sdw_modify_slave_status(slave, SDW_SLAVE_ATTACHED);
+
+			if (prev_status == SDW_SLAVE_ALERT)
+				break;
+
+			ret = sdw_initialize_slave(slave);
+			if (ret)
+				dev_err(bus->dev,
+					"Slave %d initialization failed: %d",
+					i, ret);
+
+			ret = sdw_deprep_clk_stop1(slave);
+			if (ret)
+				dev_err(bus->dev,
+					"De-prepare Slave %d failed: %d",
+					i, ret);
 
 			break;
 
