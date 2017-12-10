@@ -23,10 +23,13 @@
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
+#include <linux/acpi.h>
 #include <linux/module.h>
 #include <linux/delay.h>
 #include <linux/firmware.h>
 #include <linux/device.h>
+#include <linux/soundwire/sdw_intel.h>
+#include <asm/set_memory.h>
 
 #include "../common/sst-dsp.h"
 #include "../common/sst-dsp-priv.h"
@@ -52,18 +55,70 @@
 #define CNL_ADSP_FW_HDR_OFFSET	0x2000
 #define CNL_ROM_CTRL_DMA_ID	0x9
 
+#define CNL_IMR_MEMSIZE					0x400000  /*4MB*/
+#define HDA_ADSP_REG_ADSPCS_IMR_CACHED_TLB_START	0x100
+#define HDA_ADSP_REG_ADSPCS_IMR_UNCACHED_TLB_START	0x200
+#define HDA_ADSP_REG_ADSPCS_IMR_SIZE	0x8
+/* Needed for presilicon platform based on FPGA */
+static int cnl_fpga_alloc_imr(struct sst_dsp *ctx)
+{
+	u32 pages;
+	u32 fw_size = CNL_IMR_MEMSIZE;
+	int ret;
+
+	ret = ctx->dsp_ops.alloc_dma_buf(ctx->dev, &ctx->dsp_fw_buf, fw_size);
+
+	if (ret < 0) {
+		dev_err(ctx->dev, "Alloc buffer for base fw failed: %x\n", ret);
+		return ret;
+	}
+
+	pages = (fw_size + PAGE_SIZE - 1) >> PAGE_SHIFT;
+
+	dev_dbg(ctx->dev, "sst_cnl_fpga_alloc_imr pages=0x%x\n", pages);
+	set_memory_uc((unsigned long)ctx->dsp_fw_buf.area, pages);
+
+	writeq(virt_to_phys(ctx->dsp_fw_buf.area) + 1,
+		 ctx->addr.shim + HDA_ADSP_REG_ADSPCS_IMR_CACHED_TLB_START);
+	writeq(virt_to_phys(ctx->dsp_fw_buf.area) + 1,
+		 ctx->addr.shim + HDA_ADSP_REG_ADSPCS_IMR_UNCACHED_TLB_START);
+
+	writel(CNL_IMR_MEMSIZE, ctx->addr.shim
+	       + HDA_ADSP_REG_ADSPCS_IMR_CACHED_TLB_START
+	       + HDA_ADSP_REG_ADSPCS_IMR_SIZE);
+	writel(CNL_IMR_MEMSIZE, ctx->addr.shim
+	       + HDA_ADSP_REG_ADSPCS_IMR_UNCACHED_TLB_START
+	       + HDA_ADSP_REG_ADSPCS_IMR_SIZE);
+
+	memset(ctx->dsp_fw_buf.area, 0, fw_size);
+
+	return 0;
+}
+
+static inline void cnl_fpga_free_imr(struct sst_dsp *ctx)
+{
+	ctx->dsp_ops.free_dma_buf(ctx->dev, &ctx->dsp_fw_buf);
+}
+
 static int cnl_prepare_fw(struct sst_dsp *ctx, const void *fwdata, u32 fwsize)
 {
 
 	int ret, stream_tag;
+	u32 reg;
+	u32 pages;
+
+	/* This is required for FPGA and silicon both as of now */
+	ret = cnl_fpga_alloc_imr(ctx);
+	if (ret < 0)
+		return ret;
 
 	stream_tag = ctx->dsp_ops.prepare(ctx->dev, 0x40, fwsize, &ctx->dmab);
 	if (stream_tag <= 0) {
 		dev_err(ctx->dev, "dma prepare failed: 0%#x\n", stream_tag);
-		return stream_tag;
 	}
 
 	ctx->dsp_ops.stream_tag = stream_tag;
+	pages = (fwsize + PAGE_SIZE - 1) >> PAGE_SHIFT;
 	memcpy(ctx->dmab.area, fwdata, fwsize);
 
 	/* purge FW request */
@@ -95,6 +150,7 @@ static int cnl_prepare_fw(struct sst_dsp *ctx, const void *fwdata, u32 fwsize)
 base_fw_load_failed:
 	ctx->dsp_ops.cleanup(ctx->dev, &ctx->dmab, stream_tag);
 	cnl_dsp_disable_core(ctx, SKL_DSP_CORE0_MASK);
+	cnl_fpga_free_imr(ctx);
 
 	return ret;
 }
@@ -153,8 +209,11 @@ static int cnl_load_base_firmware(struct sst_dsp *ctx)
 		goto cnl_load_base_firmware_failed;
 	}
 
-	ret = wait_event_timeout(cnl->boot_wait, cnl->boot_complete,
-				 msecs_to_jiffies(SKL_IPC_BOOT_MSECS));
+//	ret = wait_event_timeout(cnl->boot_wait, cnl->boot_complete,
+//				 msecs_to_jiffies(SKL_IPC_BOOT_MSECS));
+
+	msleep(SKL_IPC_BOOT_MSECS);
+	ret = 1;
 	if (ret == 0) {
 		dev_err(ctx->dev, "FW ready timed-out\n");
 		cnl_dsp_disable_core(ctx, SKL_DSP_CORE0_MASK);
@@ -203,6 +262,7 @@ static int cnl_set_dsp_D0(struct sst_dsp *ctx, unsigned int core_id)
 		/* enable interrupt */
 		cnl_ipc_int_enable(ctx);
 		cnl_ipc_op_int_enable(ctx);
+		cnl_sdw_int_enable(ctx, true);
 		cnl->boot_complete = false;
 
 		ret = wait_event_timeout(cnl->boot_wait, cnl->boot_complete,
@@ -421,6 +481,56 @@ static int cnl_ipc_init(struct device *dev, struct skl_sst *cnl)
 	return 0;
 }
 
+static int cnl_config_stream(void *arg, void *s, void *dai,
+					void *params, int pdi)
+{
+	struct skl_sst *cnl = arg;
+
+	return cnl->update_params(cnl->dev, dai, s, params, pdi);
+
+}
+
+static const struct sdw_intel_ops sdw_callback = {
+	.config_stream = cnl_config_stream,
+};
+
+static int skl_sdw_init(struct skl_sst *cnl, struct device *dev,
+				void __iomem *mmio_base, int irq)
+{
+	acpi_handle handle;
+	struct sdw_intel_res res;
+
+	pr_err("SRK In func %s line %d\n", __func__, __LINE__);
+
+	handle = ACPI_HANDLE(dev);
+
+	res.mmio_base = mmio_base;
+	res.irq = irq;
+	res.parent = dev;
+	res.ops = &sdw_callback;
+	res.arg = cnl;
+
+	cnl_sdw_int_enable(cnl->dsp, 1);
+
+	cnl->sdw = sdw_intel_init(handle, &res);
+	if (!cnl->sdw) {
+		dev_err(dev, "SDW Init failed\n");
+		return -EIO;
+	}
+
+	return 0;
+}
+
+static int skl_sdw_exit(struct skl_sst *cnl)
+{
+	cnl_sdw_int_enable(cnl->dsp, 0);
+
+	if (cnl->sdw)
+		sdw_intel_exit(cnl->sdw);
+
+	return 0;
+}
+
 int cnl_sst_dsp_init(struct device *dev, void __iomem *mmio_base, int irq,
 		     const char *fw_name, struct skl_dsp_loader_ops dsp_ops,
 		     struct skl_sst **dsp)
@@ -444,6 +554,7 @@ int cnl_sst_dsp_init(struct device *dev, void __iomem *mmio_base, int irq,
 	sst->addr.sram1_base = CNL_ADSP_SRAM1_BASE;
 	sst->addr.w0_stat_sz = CNL_ADSP_W0_STAT_SZ;
 	sst->addr.w0_up_sz = CNL_ADSP_W0_UP_SZ;
+	sst->irq = irq;
 
 	sst_dsp_mailbox_init(sst, (CNL_ADSP_SRAM0_BASE + CNL_ADSP_W0_STAT_SZ),
 			     CNL_ADSP_W0_UP_SZ, CNL_ADSP_SRAM1_BASE,
@@ -455,8 +566,22 @@ int cnl_sst_dsp_init(struct device *dev, void __iomem *mmio_base, int irq,
 		return ret;
 	}
 
+	/* FIXME: Calling fw load before SDW init */
+
 	cnl->boot_complete = false;
 	init_waitqueue_head(&cnl->boot_wait);
+
+	ret = cnl_load_base_firmware(sst);
+	if (ret < 0) {
+		dev_err(dev, "load base fw failed: %d", ret);
+		return ret;
+	}
+
+	ret = skl_sdw_init(cnl, dev, sst->addr.lpe, sst->irq);
+	if (ret) {
+		dev_err(dev, "SoundWire init failed: %d\n", ret);
+		return ret;
+	}
 
 	return 0;
 }
@@ -467,15 +592,9 @@ int cnl_sst_init_fw(struct device *dev, struct skl_sst *ctx)
 	int ret;
 	struct sst_dsp *sst = ctx->dsp;
 
-	ret = ctx->dsp->fw_ops.load_fw(sst);
-	if (ret < 0) {
-		dev_err(dev, "load base fw failed: %d", ret);
-		return ret;
-	}
+
 
 	skl_dsp_init_core_state(sst);
-
-	ctx->is_first_boot = false;
 
 	return 0;
 }

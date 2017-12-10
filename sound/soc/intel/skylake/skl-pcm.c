@@ -386,7 +386,7 @@ static int skl_be_hw_params(struct snd_pcm_substream *substream,
 	p_params.s_freq = params_rate(params);
 	p_params.stream = substream->stream;
 
-	return skl_tplg_be_update_params(dai, &p_params);
+	return skl_tplg_be_update_params(dai->dev, dai, &p_params);
 }
 
 static int skl_decoupled_trigger(struct snd_pcm_substream *substream,
@@ -559,7 +559,7 @@ static int skl_link_hw_params(struct snd_pcm_substream *substream,
 	else
 		p_params.link_bps = codec_dai->driver->capture.sig_bits;
 
-	return skl_tplg_be_update_params(dai, &p_params);
+	return skl_tplg_be_update_params(dai->dev, dai, &p_params);
 }
 
 static int skl_link_pcm_prepare(struct snd_pcm_substream *substream,
@@ -1349,11 +1349,11 @@ static int skl_platform_soc_probe(struct snd_soc_platform *platform)
 			return ret;
 		}
 		skl_populate_modules(skl);
-		skl->skl_sst->update_d0i3c = skl_update_d0i3c;
-		skl_dsp_enable_notification(skl->skl_sst, false);
+//		skl->skl_sst->update_d0i3c = skl_update_d0i3c;
+//		skl_dsp_enable_notification(skl->skl_sst, false);
 	}
-	pm_runtime_mark_last_busy(platform->dev);
-	pm_runtime_put_autosuspend(platform->dev);
+//	pm_runtime_mark_last_busy(platform->dev);
+//	pm_runtime_put_autosuspend(platform->dev);
 
 	return 0;
 }

@@ -17,6 +17,7 @@
 #define __SKL_IPC_H
 
 #include <linux/irqreturn.h>
+#include <sound/soc.h>
 #include "../common/sst-ipc.h"
 
 struct sst_dsp;
@@ -96,6 +97,11 @@ struct skl_sst {
 	/* Is CGCTL.MISCBDCGE disabled */
 	bool miscbdcg_disabled;
 
+	/* callback for tplg params update */
+	int (*update_params)(struct device *dev, struct snd_soc_dai *dai,
+			struct snd_pcm_substream *s,
+			struct snd_pcm_hw_params *params, int pdi);
+
 	/* Populate module information */
 	struct list_head uuid_list;
 
@@ -118,6 +124,12 @@ struct skl_sst {
 	struct skl_d0i3_data d0i3;
 
 	const struct skl_dsp_ops *dsp_ops;
+
+	/* sdw instance */
+	void *sdw;
+
+	/* irq number */
+	int irq;
 };
 
 struct skl_ipc_init_instance_msg {
@@ -159,6 +171,13 @@ struct skl_ipc_d0ix_msg {
 #define SKL_IPC_D0_MASK	3
 
 irqreturn_t skl_dsp_irq_thread_handler(int irq, void *context);
+
+void skl_ipc_process_reply(struct sst_generic_ipc *ipc,
+		struct skl_ipc_header header);
+int skl_ipc_process_notification(struct sst_generic_ipc *ipc,
+		struct skl_ipc_header header);
+void skl_ipc_tx_data_copy(struct ipc_message *msg, char *tx_data,
+		size_t tx_size);
 
 int skl_ipc_create_pipeline(struct sst_generic_ipc *sst_ipc,
 		u16 ppl_mem_size, u8 ppl_type, u8 instance_id, u8 lp_mode);

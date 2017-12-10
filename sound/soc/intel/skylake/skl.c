@@ -32,9 +32,11 @@
 #include <sound/hda_register.h>
 #include <sound/hdaudio.h>
 #include <sound/hda_i915.h>
+#include <sound/soc.h>
 #include "skl.h"
 #include "skl-sst-dsp.h"
 #include "skl-sst-ipc.h"
+#include "skl-topology.h"
 
 static struct skl_machine_pdata skl_dmic_data;
 
@@ -355,6 +357,7 @@ static int skl_resume(struct device *dev)
 
 		if (ebus->cmd_dma_state)
 			snd_hdac_bus_init_cmd_io(&ebus->bus);
+		ret = 0;
 	} else {
 		ret = _skl_resume(ebus);
 
@@ -442,11 +445,15 @@ static int skl_machine_device_register(struct skl *skl, void *driver_data)
 	struct snd_soc_acpi_mach *mach = driver_data;
 	int ret;
 
-	mach = snd_soc_acpi_find_machine(mach);
+	if ((skl->pci->device == 0x9df0) || (skl->pci->device == 0x9dc8)
+	    || (skl->pci->device == 0x34c8) || (skl->pci->device == 0x24f0))
+		goto out;
+
 	if (mach == NULL) {
 		dev_err(bus->dev, "No matching machine driver found\n");
 		return -ENODEV;
 	}
+out:
 	skl->fw_name = mach->fw_filename;
 
 	pdev = platform_device_alloc(mach->drv_name, -1);
@@ -596,11 +603,13 @@ static void skl_probe_work(struct work_struct *work)
 	struct hdac_ext_link *hlink = NULL;
 	int err;
 
+#if 0
 	if (IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)) {
 		err = skl_i915_init(bus);
 		if (err < 0)
 			return;
 	}
+#endif
 
 	err = skl_init_chip(bus, true);
 	if (err < 0) {
@@ -611,7 +620,7 @@ static void skl_probe_work(struct work_struct *work)
 	/* codec detection */
 	if (!bus->codec_mask)
 		dev_info(bus->dev, "no hda codecs found!\n");
-
+#if 0
 	/* create codec instances */
 	skl_codec_create(ebus);
 
@@ -622,7 +631,7 @@ static void skl_probe_work(struct work_struct *work)
 			return;
 		}
 	}
-
+#endif
 	/* register platform dai and controls */
 	err = skl_platform_register(bus->dev);
 	if (err < 0)
@@ -634,8 +643,8 @@ static void skl_probe_work(struct work_struct *work)
 		snd_hdac_ext_bus_link_put(ebus, hlink);
 
 	/* configure PM */
-	pm_runtime_put_noidle(bus->dev);
-	pm_runtime_allow(bus->dev);
+//	pm_runtime_put_noidle(bus->dev);
+//	pm_runtime_allow(bus->dev);
 	skl->init_done = 1;
 
 	return;
@@ -703,6 +712,14 @@ static int skl_first_init(struct hdac_ext_bus *ebus)
 
 	skl_init_chip(bus, true);
 
+	/* TODO: Shreyas to check if required */
+	skl_enable_miscbdcge(bus->dev, false);
+	snd_hdac_chip_writew(bus, STATESTS, STATESTS_INT_MASK);
+	/* reset controller */
+	snd_hdac_bus_enter_link_reset(bus);
+	/* Bring controller out of reset */
+	snd_hdac_bus_exit_link_reset(bus);
+	skl_enable_miscbdcge(bus->dev, true);
 	snd_hdac_bus_parse_capabilities(bus);
 
 	if (skl_acquire_irq(ebus, 0) < 0)
@@ -801,7 +818,9 @@ static int skl_probe(struct pci_dev *pci,
 			dev_dbg(bus->dev, "error failed to register dsp\n");
 			goto out_mach_free;
 		}
-		skl->skl_sst->enable_miscbdcge = skl_enable_miscbdcge;
+
+		//skl->skl_sst->enable_miscbdcge = skl_enable_miscbdcge;
+		skl->skl_sst->update_params = skl_tplg_be_sdw_update_params;
 
 	}
 	if (bus->mlcap)
@@ -1005,11 +1024,16 @@ static struct snd_soc_acpi_mach sst_glk_devdata[] = {
 };
 
 static const struct snd_soc_acpi_mach sst_cnl_devdata[] = {
-	{
+/*	{
 		.id = "INT34C2",
 		.drv_name = "cnl_rt274",
 		.fw_filename = "intel/dsp_fw_cnl.bin",
 		.pdata = &cnl_pdata,
+	},*/
+	{
+		.id = "dummy",
+		.drv_name = "cnl_rt700",
+		.fw_filename = "intel/dsp_fw_cnl.bin",
 	},
 	{}
 };
