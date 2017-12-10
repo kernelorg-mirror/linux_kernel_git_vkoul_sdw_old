@@ -584,8 +584,14 @@ static int sdw_initialize_slave(struct sdw_slave *slave)
 	int ret;
 	u8 val;
 
-	/* Set bus clash and parity interrupt mask */
-	val = SDW_SCP_INT1_BUS_CLASH | SDW_SCP_INT1_PARITY;
+	/*
+	 * Set bus clash, parity and SCP implementation
+	 * defined interrupt mask
+	 * TODO: Read implementation defined interrupt mask
+	 * from Slave property
+	 */
+	val = SDW_SCP_INT1_IMPL_DEF | SDW_SCP_INT1_BUS_CLASH |
+					SDW_SCP_INT1_PARITY;
 
 	/* Enable SCP interrupts */
 	ret = sdw_update(slave, SDW_SCP_INTMASK1, val, val);
