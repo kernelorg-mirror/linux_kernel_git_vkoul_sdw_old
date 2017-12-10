@@ -413,9 +413,6 @@ struct sdw_driver {
 int sdw_handle_slave_status(struct sdw_bus *bus,
 			enum sdw_slave_status status[]);
 
-int sdw_handle_slave_status(struct sdw_bus *bus,
-			enum sdw_slave_status status[]);
-
 /*
  * SDW master structures and APIs
  */
