@@ -128,8 +128,7 @@ static int intel_clear_bit(void __iomem *base, int offset, u32 value, u32 mask)
 			return 0;
 
 		timeout--;
-		usleep_range(1, 50);
-
+		udelay(50);
 	} while (timeout != 0);
 
 	return -EAGAIN;
@@ -147,8 +146,7 @@ static int intel_set_bit(void __iomem *base, int offset, u32 value, u32 mask)
 			return 0;
 
 		timeout--;
-		usleep_range(1, 50);
-
+		udelay(50);
 	} while (timeout != 0);
 
 	return -EAGAIN;
@@ -168,7 +166,7 @@ static int intel_link_power_up(struct sdw_intel *sdw)
 	/* Link power up sequence */
 	link_control = intel_readl(shim, SDW_SHIM_LCTL);
 	spa_mask = (SDW_SHIM_LCTL_SPA << link_id);
-	cpa_mask = (SDW_SHIM_LCTL_SPA << link_id);
+	cpa_mask = (SDW_SHIM_LCTL_CPA << link_id);
 	link_control |=  spa_mask;
 
 	ret = intel_set_bit(shim, SDW_SHIM_LCTL, link_control, cpa_mask);
