@@ -117,7 +117,7 @@ int sdw_master_read_prop(struct sdw_bus *bus)
 }
 EXPORT_SYMBOL(sdw_master_read_prop);
 
-static int sdw_slave_read_dpn(struct sdw_slave *slave,
+int sdw_slave_read_dpn(struct sdw_slave *slave,
 		struct sdw_dpn_prop *dpn, int count, int ports, char *type)
 {
 	struct fwnode_handle *node;
@@ -230,6 +230,7 @@ static int sdw_slave_read_dpn(struct sdw_slave *slave,
 
 	return 0;
 }
+EXPORT_SYMBOL(sdw_slave_read_dpn);
 
 /**
  * sdw_slave_read_prop() - Read Slave properties

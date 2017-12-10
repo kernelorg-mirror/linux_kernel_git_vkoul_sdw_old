@@ -89,6 +89,10 @@ static struct sdw_intel_ctx
 		return NULL;
 	}
 
+	// BIOS FIX need count = 1
+	/* STODO: Remove before posting patches */
+	count = 2;
+
 	dev_dbg(&adev->dev, "Creating %d SDW Link devices\n", count);
 
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
@@ -110,6 +114,9 @@ static struct sdw_intel_ctx
 					+ (SDW_LINK_SIZE * i);
 		link->res.shim = res->mmio_base + SDW_SHIM_BASE;
 		link->res.alh = res->mmio_base + SDW_ALH_BASE;
+
+		link->res.ops = res->ops;
+		link->res.arg = res->arg;
 
 		memset(&pdevinfo, 0, sizeof(pdevinfo));
 

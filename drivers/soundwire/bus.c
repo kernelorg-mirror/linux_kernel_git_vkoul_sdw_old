@@ -2,6 +2,7 @@
 // Copyright(c) 2015-17 Intel Corporation.
 
 #include <linux/acpi.h>
+#include <linux/delay.h>
 #include <linux/mod_devicetable.h>
 #include <linux/pm_runtime.h>
 #include <linux/soundwire/sdw_registers.h>
@@ -17,6 +18,7 @@
  */
 int sdw_add_bus_master(struct sdw_bus *bus)
 {
+	struct sdw_master_prop *prop = NULL;
 	int ret;
 
 	if (!bus->dev) {
@@ -32,6 +34,7 @@ int sdw_add_bus_master(struct sdw_bus *bus)
 	mutex_init(&bus->msg_lock);
 	mutex_init(&bus->bus_lock);
 	INIT_LIST_HEAD(&bus->slaves);
+	INIT_LIST_HEAD(&bus->rt_list);
 
 	if (bus->ops->read_prop) {
 		ret = bus->ops->read_prop(bus);
@@ -40,6 +43,9 @@ int sdw_add_bus_master(struct sdw_bus *bus)
 			return ret;
 		}
 	}
+
+	if (!bus->compute_params)
+		bus->compute_params = &sdw_compute_params;
 
 	sdw_sysfs_bus_init(bus);
 
@@ -78,6 +84,19 @@ int sdw_add_bus_master(struct sdw_bus *bus)
 		return ret;
 	}
 
+	/*
+	 * Initialize clock values based on Master properties. The max
+	 * frequency is read from max_freq property. Current assumption
+	 * is that the bus will start at highest clock frequency when
+	 * powered on and default active bank will be 0.
+	 */
+
+	prop = &bus->prop;
+	bus->params.max_dr_freq = prop->max_freq * SDW_DOUBLE_RATE_FACTOR;
+	bus->params.curr_dr_freq = bus->params.max_dr_freq;
+	bus->params.curr_bank = SDW_BANK0;
+	bus->params.next_bank = SDW_BANK1;
+
 	return 0;
 }
 EXPORT_SYMBOL(sdw_add_bus_master);
@@ -86,6 +105,8 @@ static int sdw_delete_slave(struct device *dev, void *data)
 {
 	struct sdw_slave *slave = dev_to_sdw_dev(dev);
 	struct sdw_bus *bus = slave->bus;
+
+	sdw_sysfs_slave_exit(slave);
 
 	mutex_lock(&bus->bus_lock);
 
@@ -205,6 +226,7 @@ int sdw_transfer(struct sdw_bus *bus, struct sdw_msg *msg)
 		dev_err(bus->dev, "trf on Slave %d failed:%d\n",
 				msg->dev_num, ret);
 
+	trace_sdw_rw(bus, msg, ret);
 	if (msg->page)
 		sdw_reset_page(bus, msg->dev_num);
 
@@ -234,12 +256,12 @@ int sdw_transfer_defer(struct sdw_bus *bus, struct sdw_msg *msg,
 		dev_err(bus->dev, "Defer trf on Slave %d failed:%d\n",
 				msg->dev_num, ret);
 
+	trace_sdw_rw(bus, msg, ret);
 	if (msg->page)
 		sdw_reset_page(bus, msg->dev_num);
 
 	return ret;
 }
-
 
 int sdw_fill_msg(struct sdw_msg *msg, struct sdw_slave *slave,
 		u32 addr, size_t count, u16 dev_num, u8 flags, u8 *buf)
@@ -375,6 +397,41 @@ int sdw_write(struct sdw_slave *slave, u32 addr, u8 value)
 
 }
 EXPORT_SYMBOL(sdw_write);
+
+/*
+ * no PM versions, use with care.
+ * dev_num as SDW_BROADCAST_DEV_NUM would give ORed values
+ */
+static int sdw_read_nopm(struct sdw_bus *bus, u16 dev_num, u32 addr)
+{
+	struct sdw_msg msg;
+	u8 buf;
+	int ret;
+
+	ret = sdw_fill_msg(&msg, NULL, addr, 1, dev_num,
+			SDW_MSG_FLAG_READ, &buf);
+	if (ret)
+		return ret;
+
+	ret = sdw_transfer(bus, &msg);
+	if (ret < 0)
+		return ret;
+	else
+		return buf;
+}
+
+static int sdw_write_nopm(struct sdw_bus *bus, u16 dev_num, u32 addr, u8 value)
+{
+	struct sdw_msg msg;
+	int ret;
+
+	ret = sdw_fill_msg(&msg, NULL, addr, 1, dev_num,
+			SDW_MSG_FLAG_WRITE, &value);
+	if (ret)
+		return ret;
+
+	return sdw_transfer(bus, &msg);
+}
 
 /*
  * SDW alert handling
@@ -514,6 +571,7 @@ static int sdw_program_device_num(struct sdw_bus *bus)
 			ret = 0;
 			break;
 		}
+
 		if (ret < 0) {
 			dev_err(bus->dev, "DEVID read fail:%d\n", ret);
 			break;
@@ -578,6 +636,288 @@ static void sdw_modify_slave_status(struct sdw_slave *slave,
 	mutex_unlock(&slave->bus->bus_lock);
 }
 
+static enum sdw_clk_stop_mode sdw_get_clk_stop_mode(struct sdw_slave *slave)
+{
+	enum sdw_clk_stop_mode mode;
+
+	/*
+	 * Query for clock stop mode if Slave implements
+	 * ops->get_clk_stop_mode, else read from property.
+	 */
+	if (slave->ops && slave->ops->get_clk_stop_mode) {
+		mode = slave->ops->get_clk_stop_mode(slave);
+	} else {
+		if (slave->prop.clk_stop_mode1)
+			mode = SDW_CLK_STOP_MODE1;
+		else
+			mode = SDW_CLK_STOP_MODE0;
+	}
+
+	return mode;
+}
+
+static int sdw_slave_pre_clk_stop(struct sdw_slave *slave,
+		enum sdw_clk_stop_mode mode, bool prepare)
+{
+	enum sdw_clk_stop_type type;
+	bool wake_en;
+	u32 val = 0;
+	int ret;
+
+	if (prepare)
+		type = SDW_CLK_PRE_PREPARE;
+	else
+		type = SDW_CLK_PRE_DEPREPARE;
+
+	if ((slave->ops) && (slave->ops->clk_stop)) {
+		ret = slave->ops->clk_stop(slave, mode, type);
+		if (ret < 0) {
+			dev_err(&slave->dev, "Pre Clk Stop failed: %d\n", ret);
+			return ret;
+		}
+	}
+
+	wake_en = slave->prop.wake_capable;
+
+	if (prepare) {
+		val = SDW_SCP_SYSTEMCTRL_CLK_STP_PREP;
+
+		if (mode == SDW_CLK_STOP_MODE1)
+			val |= SDW_SCP_SYSTEMCTRL_CLK_STP_MODE1;
+		if (wake_en)
+			val |= SDW_SCP_SYSTEMCTRL_WAKE_UP_EN;
+	}
+
+	ret = sdw_write_nopm(slave->bus, slave->dev_num,
+				SDW_SCP_SYSTEMCTRL, val);
+	if (ret != 0 && ret != -ENODATA)
+		dev_err(&slave->dev,
+			"Clock Stop prepare failed for slave: %d", ret);
+
+	return ret;
+}
+
+static void sdw_bus_wait_for_clk_prep_deprep(struct sdw_bus *bus, u16 dev_num)
+{
+	int val;
+	int retry = bus->clk_stop_timeout;
+
+	do {
+		val = sdw_read_nopm(bus, dev_num,
+				SDW_SCP_STAT & SDW_SCP_STAT_CLK_STP_NF);
+		if (val <= 0)
+			break;
+
+		udelay(1000);
+		retry--;
+	} while (retry);
+
+	if (retry && (val == 0 || val == -ENODATA))
+		dev_info(bus->dev, "clock stop prep/de-prep done slave:%d",
+								dev_num);
+	else
+		dev_err(bus->dev, "clock stop prep/de-prep failed slave:%d",
+								dev_num);
+}
+
+/**
+ * sdw_bus_prep_clk_stop: prepare Slave(s) for clock stop
+ *
+ * @bus: SDW bus instance
+ *
+ * Query Slave for clock stop mode and prepare for that mode.
+ */
+int sdw_bus_prep_clk_stop(struct sdw_bus *bus)
+{
+	enum sdw_clk_stop_mode slave_mode, master_mode;
+	struct sdw_slave *slave;
+	bool is_slave = false;
+	bool simple_clk_stop = true;
+
+	master_mode = bus->prop.clk_stop_mode;
+	/*
+	 * In order to save on transition time, prepare
+	 * each Slave and then wait for all Slave(s) to be
+	 * prepared for clock stop.
+	 */
+	list_for_each_entry(slave, &bus->slaves, node) {
+
+		if (!slave->dev_num)
+			continue;
+
+		/* Identify if Slave(s) are available on Bus */
+		is_slave = true;
+
+		if (slave->status == SDW_SLAVE_ATTACHED) {
+			slave_mode = sdw_get_clk_stop_mode(slave);
+
+			if (!(master_mode & slave_mode))
+				slave_mode = SDW_CLK_STOP_MODE0;
+
+			slave->curr_clk_stop_mode = slave_mode;
+			sdw_slave_pre_clk_stop(slave, slave_mode, true);
+
+			if (!slave->prop.simple_clk_stop_capable)
+				simple_clk_stop = false;
+		}
+	}
+
+	if ((is_slave) && (!simple_clk_stop))
+		sdw_bus_wait_for_clk_prep_deprep(bus, SDW_BROADCAST_DEV_NUM);
+
+	/* tell slaves that prep is done */
+	list_for_each_entry(slave, &bus->slaves, node) {
+
+		if (!slave->dev_num)
+			continue;
+
+		if (slave->status != SDW_SLAVE_ATTACHED)
+			continue;
+
+		slave_mode = slave->curr_clk_stop_mode;
+
+		if ((slave->ops) && (slave->ops->clk_stop))
+			slave->ops->clk_stop(slave, slave_mode,
+					SDW_CLK_POST_PREPARE);
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(sdw_bus_prep_clk_stop);
+
+/**
+ * sdw_bus_clk_stop: stop bus clock
+ *
+ * @bus: SDW bus instance
+ *
+ * After preparing the Slaves for clock stop, stop the clock by broadcasting
+ * write to SCP_CTRL register.
+ */
+int sdw_bus_clk_stop(struct sdw_bus *bus)
+{
+	enum sdw_clk_stop_mode mode;
+	struct sdw_slave *slave;
+	int ret;
+
+	/*
+	 * broadcast clock stop now, attached Slaves will ACK this,
+	 * unattached will ignore
+	 */
+	ret = sdw_write_nopm(bus, SDW_BROADCAST_DEV_NUM,
+			SDW_SCP_CTRL, SDW_SCP_CTRL_CLK_STP_NOW);
+	if (ret != 0 && ret != -ENODATA) {
+		dev_err(bus->dev,
+			"ClockStopNow Broadcast message failed %d", ret);
+		return ret;
+	}
+
+	/* Now mark Slaves entering clock stop 1 as unattached */
+	list_for_each_entry(slave, &bus->slaves, node) {
+
+		if (!slave->dev_num)
+			continue;
+
+		mode = slave->curr_clk_stop_mode;
+		if (mode == SDW_CLK_STOP_MODE0)
+			continue;
+
+		sdw_modify_slave_status(slave, SDW_SLAVE_UNATTACHED);
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(sdw_bus_clk_stop);
+
+/**
+ * sdw_bus_exit_clk_stop: Exit clock stop mode
+ *
+ * @bus: SDW bus instance
+ *
+ * This De-prepares the Slaves by exiting Clock Stop Mode 0. For the Slaves
+ * exiting Clock Stop Mode 1, they will be de-prepared after they enumerate
+ * back.
+ */
+int sdw_bus_exit_clk_stop(struct sdw_bus *bus)
+{
+	enum sdw_clk_stop_mode mode;
+	struct sdw_slave *slave;
+	bool is_slave = false;
+	bool simple_clk_stop = true;
+
+	/*
+	 * In order to save on transition time, de-prepare
+	 * each Slave and then wait for all Slave(s) to be
+	 * de-prepared after clock resume.
+	 */
+	list_for_each_entry(slave, &bus->slaves, node) {
+
+		if (!slave->dev_num)
+			continue;
+
+		/* Identify if Slave(s) are available on Bus */
+		is_slave = true;
+
+		if (slave->status == SDW_SLAVE_ATTACHED) {
+			mode = slave->curr_clk_stop_mode;
+			if (mode == SDW_CLK_STOP_MODE1)
+				continue;
+
+			sdw_slave_pre_clk_stop(slave, mode, false);
+
+			if (!slave->prop.simple_clk_stop_capable)
+				simple_clk_stop = false;
+		}
+	}
+
+	if ((is_slave) && (!simple_clk_stop))
+		sdw_bus_wait_for_clk_prep_deprep(bus, SDW_BROADCAST_DEV_NUM);
+
+	list_for_each_entry(slave, &bus->slaves, node) {
+
+		if (!slave->dev_num)
+			continue;
+
+		if (slave->status == SDW_SLAVE_ATTACHED) {
+			mode = slave->curr_clk_stop_mode;
+			if (mode == SDW_CLK_STOP_MODE1)
+				continue;
+
+			if (slave->ops->clk_stop)
+				slave->ops->clk_stop(slave,
+						mode, SDW_CLK_POST_DEPREPARE);
+		}
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(sdw_bus_exit_clk_stop);
+
+int sdw_configure_dpn_intr(struct sdw_slave *slave,
+			int port, bool enable, int mask)
+{
+	u32 addr;
+	int ret;
+	u8 val = 0;
+
+	addr = SDW_DPN_INTMASK(port);
+
+	/* Set/Clear port ready interrupt mask */
+	if (enable) {
+		val |= mask;
+		val |= SDW_DPN_INT_PORT_READY;
+	} else {
+		val &= ~(mask);
+		val &= ~SDW_DPN_INT_PORT_READY;
+	}
+
+	ret = sdw_update(slave, addr, (mask | SDW_DPN_INT_PORT_READY), val);
+	if (ret < 0)
+		dev_err(slave->bus->dev,
+				"SDW_DPN_INTMASK write failed:%d", val);
+
+	return ret;
+}
+
 static int sdw_initialize_slave(struct sdw_slave *slave)
 {
 	struct sdw_slave_prop *prop = &slave->prop;
@@ -614,6 +954,41 @@ static int sdw_initialize_slave(struct sdw_slave *slave)
 		dev_err(slave->bus->dev,
 				"SDW_DP0_INTMASK read failed:%d", ret);
 		return val;
+	}
+
+	return 0;
+}
+
+static int sdw_deprep_clk_stop1(struct sdw_slave *slave)
+{
+	int val;
+
+	/*  Check property to deprepare the Slave */
+	if (!slave->prop.reset_behave)
+		return 0;
+
+	val = sdw_read_nopm(slave->bus, slave->dev_num, SDW_SCP_SYSTEMCTRL);
+	if (val != 0 && val != -ENODATA) {
+		dev_err(slave->bus->dev,
+				"SDW_SCP_SYSTEMCTRL read failed:%d", val);
+		return val;
+	}
+
+	if (!(val & SDW_SCP_SYSTEMCTRL_CLK_STP_PREP))
+		return 0;
+
+	/* Call driver clock stop */
+	sdw_slave_pre_clk_stop(slave, SDW_CLK_STOP_MODE1, false);
+
+	/* Wait till de-prepare is complete by checking NF bit */
+	if (!slave->prop.simple_clk_stop_capable)
+		sdw_bus_wait_for_clk_prep_deprep(slave->bus, slave->dev_num);
+
+	/* Inform driver */
+	if (slave->ops->clk_stop) {
+		slave->ops->clk_stop(slave,
+				SDW_CLK_STOP_MODE1, SDW_CLK_POST_DEPREPARE);
+
 	}
 
 	return 0;

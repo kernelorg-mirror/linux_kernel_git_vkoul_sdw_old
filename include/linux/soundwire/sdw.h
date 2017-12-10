@@ -15,6 +15,10 @@ struct sdw_slave;
 /* SDW Enumeration Device Number */
 #define SDW_ENUM_DEV_NUM		0
 
+/* SDW Bank */
+#define SDW_BANK0			0
+#define SDW_BANK1			1
+
 /* SDW Group Device Numbers */
 #define SDW_GROUP12_DEV_NUM		12
 #define SDW_GROUP13_DEV_NUM		13
@@ -22,9 +26,47 @@ struct sdw_slave;
 /* SDW Master Device Number, not supported yet */
 #define SDW_MASTER_DEV_NUM		14
 
-#define SDW_NUM_DEV_ID_REGISTERS	6
+/* frame shape defines */
 
+/*
+ * Note: The maximum row define in SoundWire spec 1.1 is 23. In order to
+ * fill hole with 0, one more dummy entry is added
+ */
+#define SDW_FRAME_ROWS		24
+#define SDW_FRAME_COLS		8
+#define SDW_FRAME_ROW_COLS		(SDW_FRAME_ROWS * SDW_FRAME_COLS)
+
+#define SDW_FRAME_CTRL_BITS		48
+
+#define SDW_NUM_DEV_ID_REGISTERS	6
 #define SDW_MAX_DEVICES			11
+
+#define SDW_VALID_PORT_RANGE(n)		(n <= 14 && n >= 1)
+
+enum {
+	SDW_PORT_DIRN_SINK = 0,
+	SDW_PORT_DIRN_SOURCE,
+	SDW_PORT_DIRN_MAX,
+};
+
+/*
+ * constants for flow control, ports and transport
+ *
+ * these are bit masks as devices can have multiple capabilities
+ */
+
+/*
+ * flow modes for SDW port. These can be isochronous, tx controlled,
+ * rx controlled or async
+ */
+#define SDW_PORT_FLOW_MODE_ISOCH	0
+#define SDW_PORT_FLOW_MODE_TX_CNTRL	BIT(0)
+#define SDW_PORT_FLOW_MODE_RX_CNTRL	BIT(1)
+#define SDW_PORT_FLOW_MODE_ASYNC	GENMASK(1, 0)
+
+/* sample packaging for block. It can be per port or per channel */
+#define SDW_BLOCK_PACKG_PER_PORT	BIT(0)
+#define SDW_BLOCK_PACKG_PER_CH		BIT(1)
 
 /**
  * enum sdw_slave_status - Slave status
@@ -59,6 +101,61 @@ enum sdw_command_response {
 	SDW_CMD_FAIL = 2,
 	SDW_CMD_TIMEOUT = 3,
 	SDW_CMD_FAIL_OTHER = 4,
+};
+
+/* block group count enum */
+enum sdw_dpn_grouping {
+	SDW_BLK_GRP_CNT_1 = 0,
+	SDW_BLK_GRP_CNT_2 = 1,
+	SDW_BLK_GRP_CNT_3 = 2,
+	SDW_BLK_GRP_CNT_4 = 3,
+};
+
+/**
+ * enum sdw_stream_type: data stream type
+ *
+ * @SDW_STREAM_PCM: PCM data stream
+ * @SDW_STREAM_PDM: PDM data stream
+ *
+ * spec doesn't define this, but is used in implementation
+ */
+enum sdw_stream_type {
+	SDW_STREAM_PCM = 0,
+	SDW_STREAM_PDM = 1,
+};
+
+/**
+ * enum sdw_data_direction: Data direction w.r.t Port
+ *
+ * @SDW_DATA_DIR_IN: Data into Port
+ * @SDW_DATA_DIR_OUT: Data out of Port
+ *
+ * For playback, data direction for the Master Port will be OUT as PORT is
+ * doing tx. Slave port will be IN as PORT is doing rx
+ */
+enum sdw_data_direction {
+	SDW_DATA_DIR_IN = 0,
+	SDW_DATA_DIR_OUT = 1,
+};
+
+/**
+ * enum sdw_port_data_mode: Data Port mode
+ *
+ * @SDW_PORT_DATA_MODE_NORMAL: Normal data mode where audio data is received
+ * and transmitted.
+ * @SDW_PORT_DATA_MODE_STATIC_1: Simple test mode which uses static value of
+ * logic 1. The encoding will result in signal transitions at every bitslot
+ * owned by this Port
+ * @SDW_PORT_DATA_MODE_STATIC_0: Simple test mode which uses static value of
+ * logic 0. The encoding will result in no signal transitions
+ * @SDW_PORT_DATA_MODE_PRBS: Test mode which uses a PRBS generator to produce
+ * a pseudo random data pattern that is transferred
+ */
+enum sdw_port_data_mode {
+	SDW_PORT_DATA_MODE_NORMAL = 0,
+	SDW_PORT_DATA_MODE_STATIC_1 = 1,
+	SDW_PORT_DATA_MODE_STATIC_0 = 2,
+	SDW_PORT_DATA_MODE_PRBS = 3,
 };
 
 /*
@@ -306,6 +403,8 @@ struct sdw_master_prop {
 
 int sdw_master_read_prop(struct sdw_bus *bus);
 int sdw_slave_read_prop(struct sdw_slave *slave);
+int sdw_slave_read_dpn(struct sdw_slave *slave,
+		struct sdw_dpn_prop *dpn, int count, int ports, char *type);
 
 /*
  * SDW sysfs APIs
@@ -315,6 +414,8 @@ struct sdw_master_sysfs;
 
 int sdw_sysfs_bus_init(struct sdw_bus *bus);
 void sdw_sysfs_bus_exit(struct sdw_bus *bus);
+int sdw_sysfs_slave_init(struct sdw_slave *slave);
+void sdw_sysfs_slave_exit(struct sdw_slave *slave);
 
 /*
  * SDW Slave Structures and APIs
@@ -350,11 +451,98 @@ struct sdw_slave_intr_status {
 };
 
 /**
- * struct sdw_slave_ops - Slave driver callback ops
+ * enum sdw_clk_stop_type: clock stop operations
+ *
+ * @SDW_CLK_PRE_PREPARE: pre clock stop prepare
+ * @SDW_CLK_POST_PREPARE: post clock stop prepare
+ * @SDW_CLK_PRE_DEPREPARE: pre clock stop de-prepare
+ * @SDW_CLK_POST_DEPREPARE: post clock stop de-prepare
+ */
+enum sdw_clk_stop_type {
+	SDW_CLK_PRE_PREPARE = 0,
+	SDW_CLK_POST_PREPARE,
+	SDW_CLK_PRE_DEPREPARE,
+	SDW_CLK_POST_DEPREPARE,
+};
+
+/**
+ * struct sdw_bus_conf: Bus configuration
+ *
+ * @clk_freq: Clock frequency, in Hz
+ * @num_rows: Number of rows in frame
+ * @num_cols: Number of columns in frame
+ * @bank: Next register bank
+ */
+struct sdw_bus_conf {
+	unsigned int clk_freq;
+	unsigned int num_rows;
+	unsigned int num_cols;
+	unsigned int bank;
+};
+
+/**
+ * struct sdw_prepare_ch: Prepare/De-prepare Data Port channel
+ *
+ * @num: Port number
+ * @ch_mask: Active channel mask
+ * @prepare: Prepare (true) /de-prepare (false) channel
+ * @bank: Register bank, which bank Slave/Master driver should program for
+ * implementation defined registers. This is the inverted value of the
+ * current bank.
+ *
+ */
+struct sdw_prepare_ch {
+	unsigned int num;
+	unsigned int ch_mask;
+	bool prepare;
+	unsigned int bank;
+};
+
+/**
+ * enum sdw_port_prep_ops: Prepare operations for Data Port
+ *
+ * @SDW_OPS_PORT_PRE_PREP: Pre prepare operation for the Port
+ * @SDW_OPS_PORT_PREP: Prepare operation for the Port
+ * @SDW_OPS_PORT_POST_PREP: Post prepare operation for the Port
+ */
+enum sdw_port_prep_ops {
+	SDW_OPS_PORT_PRE_PREP = 0,
+	SDW_OPS_PORT_PREP = 1,
+	SDW_OPS_PORT_POST_PREP = 2,
+};
+
+/**
+ * struct sdw_bus_params: Structure holding bus configuration
+ *
+ * @curr_bank: Current bank in use (BANK0/BANK1)
+ * @next_bank: Next bank to use (BANK0/BANK1)
+ * @max_dr_freq: Maximum double rate clock frequency supported, in Hz
+ * @curr_dr_freq: Current double rate clock frequency, in Hz
+ * @bandwidth: Current bandwidth
+ * @col: Active columns
+ * @row: Active rows
+ */
+struct sdw_bus_params {
+	unsigned int curr_bank;
+	unsigned int next_bank;
+	unsigned int max_dr_freq;
+	unsigned int curr_dr_freq;
+	unsigned int bandwidth;
+	unsigned int col;
+	unsigned int row;
+};
+
+/**
+ * struct sdw_slave_ops: Slave driver callback ops
+ *
  * @read_prop: Read Slave properties
  * @interrupt_callback: Device interrupt notification (invoked in thread
  * context)
  * @update_status: Update Slave status
+ * @get_clk_stop_mode: Query the clock mode to be entered
+ * @clk_stop: Clock stop callback
+ * @bus_config: Update the bus config for Slave
+ * @port_prep: Prepare the port with parameters
  */
 struct sdw_slave_ops {
 	int (*read_prop)(struct sdw_slave *sdw);
@@ -362,6 +550,15 @@ struct sdw_slave_ops {
 			struct sdw_slave_intr_status *status);
 	int (*update_status)(struct sdw_slave *slave,
 			enum sdw_slave_status status);
+	int (*get_clk_stop_mode)(struct sdw_slave *slave);
+	int (*clk_stop)(struct sdw_slave *slave,
+			enum sdw_clk_stop_mode mode,
+			enum sdw_clk_stop_type type);
+	int (*bus_config)(struct sdw_slave *slave,
+			struct sdw_bus_params *params);
+	int (*port_prep)(struct sdw_slave *slave,
+			struct sdw_prepare_ch *prepare_ch,
+			enum sdw_port_prep_ops pre_ops);
 };
 
 /**
@@ -375,6 +572,7 @@ struct sdw_slave_ops {
  * @sysfs: Sysfs interface
  * @node: node for bus list
  * @port_ready: Port ready completion flag for each Slave port
+ * @curr_clk_stop_mode: Current clock stop mode
  * @dev_num: Device Number assigned by Bus
  */
 struct sdw_slave {
@@ -387,6 +585,7 @@ struct sdw_slave {
 	struct sdw_slave_sysfs *sysfs;
 	struct list_head node;
 	struct completion *port_ready;
+	enum sdw_clk_stop_mode curr_clk_stop_mode;
 	u16 dev_num;
 };
 
@@ -417,6 +616,95 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
  * SDW master structures and APIs
  */
 
+/**
+ * struct sdw_port_params: Data Port parameters
+ *
+ * @num: Port number
+ * @bps: Word length of the Port
+ * @flow_mode: Port Data flow mode
+ * @data_mode: Test modes or normal mode
+ *
+ * This is used to program the Data Port based on Data Port stream
+ * parameters.
+ */
+struct sdw_port_params {
+	unsigned int num;
+	unsigned int bps;
+	unsigned int flow_mode;
+	unsigned int data_mode;
+};
+
+/**
+ * struct sdw_transport_params: Data Port Transport Parameters
+ *
+ * @blk_grp_ctrl_valid: Port implements block group control
+ * @num: Port number
+ * @blk_grp_ctrl: Block group control value
+ * @sample_interval: Sample interval
+ * @offset1: Blockoffset of the payload data
+ * @offset2: Blockoffset of the payload data
+ * @hstart: Horizontal start of the payload data
+ * @hstop: Horizontal stop of the payload data
+ * @blk_pkg_mode: Block per channel or block per port
+ * @lane_ctrl: Data lane Port uses for Data transfer. Currently only single
+ * data lane is supported in bus
+ *
+ * This is used to program the Data Port based on Data Port transport
+ * parameters. All these parameters are banked and can be modified
+ * during a bank switch without any artifacts in audio stream.
+ */
+struct sdw_transport_params {
+	bool blk_grp_ctrl_valid;
+	unsigned int port_num;
+	unsigned int blk_grp_ctrl;
+	unsigned int sample_interval;
+	unsigned int offset1;
+	unsigned int offset2;
+	unsigned int hstart;
+	unsigned int hstop;
+	unsigned int blk_pkg_mode;
+	unsigned int lane_ctrl;
+};
+
+/**
+ * struct sdw_enable_ch: Enable/disable Data Port channel
+ *
+ * @num: Port number
+ * @ch_mask: Active channel mask
+ * @enable: Enable (true) /disable (disable) channel
+ */
+struct sdw_enable_ch {
+	unsigned int num;
+	unsigned int ch_mask;
+	bool enable;
+};
+
+/**
+ * struct sdw_master_port_ops: Callback functions from bus to Master
+ * driver to set Master Data ports.
+ *
+ * @dpn_set_port_params: Set the Port parameters for the Master Port.
+ * Mandatory callback
+ * @dpn_set_port_transport_params: Set transport parameters for the Master
+ * Port. Mandatory callback
+ * @dpn_port_prep: Port prepare operations for the Master Data Port.
+ * Invoked for PRE PREPARE, PREPARE and POST PREPARE
+ * @dpn_port_enable_ch: Enable the channels of Master Port.
+ */
+struct sdw_master_port_ops {
+	int (*dpn_set_port_params)(struct sdw_bus *bus,
+			struct sdw_port_params *port_params,
+			unsigned int bank);
+	int (*dpn_set_port_transport_params)(struct sdw_bus *bus,
+			struct sdw_transport_params *transport_params,
+			unsigned int bank);
+	int (*dpn_port_prep)(struct sdw_bus *bus,
+			struct sdw_prepare_ch *prepare_ch,
+			enum sdw_port_prep_ops prep_ops);
+	int (*dpn_port_enable_ch)(struct sdw_bus *bus,
+			struct sdw_enable_ch *enable_ch, unsigned int bank);
+};
+
 struct sdw_msg;
 
 /**
@@ -437,6 +725,9 @@ struct sdw_defer {
  * @xfer_msg: Transfer message callback
  * @xfer_msg_defer: Defer version of transfer message callback
  * @reset_page_addr: Reset the SCP page address registers
+ * @set_bus_conf: Set the bus configuration
+ * @pre_bank_switch: Callback for pre bank switch
+ * @post_bank_switch: Callback for post bank switch
  */
 struct sdw_master_ops {
 	int (*read_prop)(struct sdw_bus *bus);
@@ -448,6 +739,11 @@ struct sdw_master_ops {
 			struct sdw_defer *defer);
 	enum sdw_command_response (*reset_page_addr)
 			(struct sdw_bus *bus, unsigned int dev_num);
+	int (*set_bus_conf)(struct sdw_bus *bus,
+			struct sdw_bus_params *params);
+	int (*pre_bank_switch)(struct sdw_bus *bus);
+	int (*post_bank_switch)(struct sdw_bus *bus);
+
 };
 
 /**
@@ -459,11 +755,19 @@ struct sdw_master_ops {
  * Bit set implies used number, bit clear implies unused number.
  * @bus_lock: bus lock
  * @msg_lock: message lock
+ * @compute_params: points to Bus resource management implementation
  * @ops: Master callback ops
+ * @port_ops: Master port callback ops
+ * @params: Current bus parameters
  * @prop: Master properties
  * @sysfs: Bus sysfs
+ * @rt_list: List of Master instance of all stream(s) running on Bus. This
+ * is used to compute and program bus bandwidth, clock, frame shape,
+ * transport and port parameters
+ * @link_sync_mask: sync mask value
  * @defer_msg: Defer message
  * @clk_stop_timeout: Clock stop timeout computed
+ * @bank_switch_timeout: Bank switch timeout computed
  */
 struct sdw_bus {
 	struct device *dev;
@@ -472,15 +776,82 @@ struct sdw_bus {
 	DECLARE_BITMAP(assigned, SDW_MAX_DEVICES);
 	struct mutex bus_lock;
 	struct mutex msg_lock;
+	int (*compute_params)(struct sdw_bus *bus);
 	const struct sdw_master_ops *ops;
+	const struct sdw_master_port_ops *port_ops;
+	struct sdw_bus_params params;
 	struct sdw_master_prop prop;
 	struct sdw_master_sysfs *sysfs;
+	struct list_head rt_list;
+	unsigned int link_sync_mask;
 	struct sdw_defer defer_msg;
 	unsigned int clk_stop_timeout;
+	u32 bank_switch_timeout;
 };
 
 int sdw_add_bus_master(struct sdw_bus *bus);
 void sdw_delete_bus_master(struct sdw_bus *bus);
+
+int sdw_alloc_stream_tag(void);
+void sdw_release_stream_tag(int tag);
+
+/**
+ * sdw_port_config: Master or Slave Port configuration
+ *
+ * @num: Port number
+ * @ch_mask: channels mask for port
+ */
+struct sdw_port_config {
+	unsigned int num;
+	unsigned int ch_mask;
+};
+
+/**
+ * sdw_ports_config: Master or Slave Port configuration for all ports in a
+ * stream
+ *
+ * @num: Number of ports
+ * @port_config: Configuration for each Port.
+ */
+struct sdw_ports_config {
+	unsigned int num;
+	struct sdw_port_config *port_config;
+};
+
+/**
+ * sdw_stream_config: Master or Slave stream configuration
+ *
+ * @frame_rate: Audio frame rate of the stream, in Hz
+ * @ch_count: Channel count of the stream
+ * @bps: Number of bits per audio sample
+ * @direction: Data direction w.r.t Port
+ * @type: Stream type PCM or PDM
+ */
+struct sdw_stream_config {
+	unsigned int frame_rate;
+	unsigned int ch_count;
+	unsigned int bps;
+	enum sdw_data_direction direction;
+	enum sdw_stream_type type;
+};
+
+int sdw_compute_params(struct sdw_bus *bus);
+int sdw_config_stream(struct sdw_bus *bus, struct sdw_slave *slave,
+			struct sdw_stream_config *stream_config, int tag);
+int sdw_config_ports(struct sdw_bus *bus, struct sdw_slave *slave,
+			struct sdw_ports_config *ports_config, int tag);
+
+int sdw_release_stream(struct sdw_bus *bus, struct sdw_slave *slave, int tag);
+int sdw_release_ports(struct sdw_bus *bus, struct sdw_slave *slave, int tag);
+
+int sdw_prepare_stream(int tag);
+int sdw_enable_stream(int tag);
+int sdw_disable_stream(int tag);
+int sdw_deprepare_stream(int tag);
+
+int sdw_bus_prep_clk_stop(struct sdw_bus *bus);
+int sdw_bus_clk_stop(struct sdw_bus *bus);
+int sdw_bus_exit_clk_stop(struct sdw_bus *bus);
 
 /* messaging and data APIs */
 

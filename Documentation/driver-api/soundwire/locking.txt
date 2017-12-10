@@ -1,0 +1,85 @@
+This document explains locking mechanism of the SoundWire Bus. Bus uses
+following locks in order to avoid race conditions in Bus operations on
+shared resources.
+
+1. Core lock
+2. Bus lock
+3. Message lock
+4. Stream lock
+
+1. Core lock: Global SoundWire Bus lock. This mutex lock is part of global
+SoundWire stream data structure named sdw_core. Since sdw_core is common
+data structure across all the Bus instances, this lock is used to serialize
+access to elements in sdw_core data structure.
+
+2. Bus lock: SoundWire Bus instance lock. This mutex lock is part of Bus
+data structure (sdw_bus) which is used for every Bus instance. This lock is
+used to serialize each of the following operations(s) within SoundWire Bus
+instance.
+	- Addition and removal of Slave(s), changing Slave status.
+	- Prepare, Enable, Disable and De-prepare stream operations.
+
+3. Message lock: SoundWire message transfer lock. This mutex lock is part of
+Bus data structure (sdw_bus). This lock is used to serialize the message
+transfers (read/write) within the SoundWire Bus instance such as programming
+Slave registers or broadcasting message on Bus during bank switch operation.
+
+4. Stream lock: SoundWire stream lock. This mutex lock is part of stream
+data structure (sdw_stream_runtime) which is allocated for each stream.
+Since there can be multiple Master(s) and Slave(s) involved in single
+stream and all Master(s) and Slave(s) modifies sdw_stream_runtime data
+structure while configuration and de-configuration of stream, this lock is
+used to serialize access of stream data structure.
+
+Example
+=======
+
+Below example shows how locks are acquired during prepare and enable
+operation for stream with Master 1 and Slave 1. In this example, stream with
+unique tag 1 is associated with Master 1 and Slave 1.
+
+1. Acquire and release Core lock in order to retrieve stream_tag data
+structure for stream tag 1.
+2. Acquire lock for Bus instance associated with Master 1.
+3. Acquire Stream lock.
+4. For every message transfer in Prepare and Enable operation
+	a. Acquire Message lock.
+	b. Transfer message (Read/Write) to Slave1 or broadcast message on
+	Bus in case of bank switch.
+	c. Release Message lock.
+5. Release Stream lock.
+6. Release lock for Bus instance associated with Master 1.
+
+
++-------------+                      +------------+
+|             |                      |            |
+|Master Driver|                      |    Bus     |
+|             |                      |            |
++-----+-------+                      +-----+------+
+      |       sdw_prepare_and_enable()     |
+      +---------------------------------->--+    1. Acquire Core Mutex lock
+      |                                   |-|    2. Retrieve Stream tag
+      |                                   +-+    3. Release Core Mutex lock
+      |                                    |
+      |                                   +-+    1. Acquire Bus Mutex lock
+      |                                   |-|    2. Acquire Stream lock
+      |                                   +-+
+      |                                    |
+      |                                   +-+    1. For each slave message xfer
+      |                                   |-|    or bank switch in prepare and
+      |        bus->ops->xfer_msg()       |-+    enable operation, acquire
+     +--<----------------------------------+     Message lock.
+     |-|                                   |
+     +-|                                   |
+      +---------------------------------->--+    1. For each slave message xfer
+      |       return success/error        |-|    or bank switch completion in
+      |                                   +-+    prepare and enable operation,
+      |                                    |     release Message lock.
+      |                                    |
+      |                                   +-+    1. Release Stream lock
+      |                                   |-|    2. Release Bus Mutex lock
+      |                                   +-+
+      |       return success/error         |
+      <------------------------------------+
+      |                                    |
+      +                                    +

@@ -341,3 +341,13 @@ const struct attribute_group *sdw_slave_dev_attr_groups[] = {
 	&sdw_slave_dev_attr_group,
 	NULL
 };
+
+int sdw_sysfs_slave_init(struct sdw_slave *slave)
+{
+	/* TODO: Initialize dp0 and dpn kobject and attribute */
+	return 0;
+}
+
+void sdw_sysfs_slave_exit(struct sdw_slave *slave)
+{
+}
