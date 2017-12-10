@@ -346,7 +346,7 @@ struct sdw_slave_id {
  */
 struct sdw_slave_intr_status {
 	u8 control_port;
-	u8 port[14];
+	u8 port[15];
 };
 
 /**
