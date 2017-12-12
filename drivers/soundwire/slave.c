@@ -93,7 +93,7 @@ int sdw_acpi_find_slaves(struct sdw_bus *bus)
 			return status;
 		}
 
-		/* Extract link id from ADR, it is from 51 to bits */
+		/* Extract link id from ADR, Bit 51 to 48 (included) */
 		link_id = (addr >> 48) & GENMASK(3, 0);
 
 		/* Check for link_id match */

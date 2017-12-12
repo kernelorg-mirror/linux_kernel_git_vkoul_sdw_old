@@ -64,7 +64,8 @@ int sdw_add_bus_master(struct sdw_bus *bus)
 	set_bit(SDW_BROADCAST_DEV_NUM, bus->assigned);
 
 	/* Set group device numbers and master device number */
-	set_bit(SDW_GROUP12_DEV_NUM | SDW_GROUP13_DEV_NUM, bus->assigned);
+	set_bit(SDW_GROUP12_DEV_NUM, bus->assigned);
+	set_bit(SDW_GROUP13_DEV_NUM, bus->assigned);
 	set_bit(SDW_MASTER_DEV_NUM, bus->assigned);
 
 	/*
