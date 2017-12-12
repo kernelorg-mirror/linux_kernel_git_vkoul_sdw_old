@@ -1144,7 +1144,7 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 	int port_num, stat, ret, count = 0;
 	unsigned long port;
 	bool slave_notify = false;
-	u8 buf, buf2[3];
+	u8 buf, buf2[2], _buf, _buf2[2];
 
 	sdw_modify_slave_status(slave, SDW_SLAVE_ALERT);
 
@@ -1248,14 +1248,14 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 		 * Read status again to ensure no new interrupts arrived
 		 * while servicing interrupts.
 		 */
-		ret = buf = sdw_read(slave, SDW_SCP_INT1);
+		ret = _buf = sdw_read(slave, SDW_SCP_INT1);
 		if (ret < 0) {
 			dev_err(slave->bus->dev,
 					"SDW_SCP_INT1 read failed:%d", ret);
 			return ret;
 		}
 
-		ret = sdw_nread(slave, SDW_SCP_INTSTAT2, 2, buf2);
+		ret = sdw_nread(slave, SDW_SCP_INTSTAT2, 2, _buf2);
 		if (ret < 0) {
 			dev_err(slave->bus->dev,
 					"SDW_SCP_INT2/3 read failed:%d", ret);
@@ -1263,7 +1263,10 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 		}
 
 		/* Make sure no interrupts are pending */
-		stat = buf & buf2[0] || buf & buf2[1] || buf & buf2[2];
+		buf &= _buf;
+		buf2[0] &= _buf2[0];
+		buf2[1] &= _buf2[1];
+		stat = buf || buf2[0] || buf2[1];
 
 		/*
 		 * Exit loop if Slave is continuously in ALERT state even
