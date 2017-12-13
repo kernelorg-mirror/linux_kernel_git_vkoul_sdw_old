@@ -1156,7 +1156,7 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 		return ret;
 	}
 
-	ret = sdw_nread(slave, SDW_SCP_INTSTAT2, 3, buf2);
+	ret = sdw_nread(slave, SDW_SCP_INTSTAT2, 2, buf2);
 	if (ret < 0) {
 		dev_err(slave->bus->dev,
 					"SDW_SCP_INT2/3 read failed:%d", ret);
