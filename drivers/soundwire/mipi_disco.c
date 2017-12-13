@@ -60,25 +60,24 @@ int sdw_master_read_prop(struct sdw_bus *bus)
 
 	nval = fwnode_property_read_u32_array(link,
 			"mipi-sdw-clock-frequencies-supported", NULL, 0);
-	if (nval < 0)
-		return -EIO;
+	if (nval > 0) {
 
-	prop->num_freq = nval;
+		prop->num_freq = nval;
+		prop->freq = devm_kcalloc(bus->dev, prop->num_freq,
+				sizeof(*prop->freq), GFP_KERNEL);
+		if (!prop->freq)
+			return -ENOMEM;
 
-	prop->freq = devm_kcalloc(bus->dev, prop->num_freq,
-			sizeof(*prop->freq), GFP_KERNEL);
-	if (!prop->freq)
-		return -ENOMEM;
-
-	fwnode_property_read_u32_array(link,
-			"mipi-sdw-clock-frequencies-supported",
-			prop->freq, prop->num_freq);
+		fwnode_property_read_u32_array(link,
+				"mipi-sdw-clock-frequencies-supported",
+				prop->freq, prop->num_freq);
+	}
 
 	/*
 	 * Check the frequencies supported. If FW doesn't provide max
 	 * freq, then populate here by checking values.
 	 */
-	if (!prop->max_freq) {
+	if (!prop->max_freq && prop->freq) {
 		prop->max_freq = prop->freq[0];
 		for (i = 1; i < prop->num_freq; i++) {
 			if (prop->freq[i] > prop->max_freq)
@@ -88,19 +87,18 @@ int sdw_master_read_prop(struct sdw_bus *bus)
 
 	nval = fwnode_property_read_u32_array(link,
 			"mipi-sdw-supported-clock-gears", NULL, 0);
-	if (nval < 0)
-		return -EIO;
+	if (nval > 0) {
 
-	prop->num_clk_gears = nval;
+		prop->num_clk_gears = nval;
+		prop->clk_gears = devm_kcalloc(bus->dev, prop->num_clk_gears,
+				sizeof(*prop->clk_gears), GFP_KERNEL);
+		if (!prop->clk_gears)
+			return -ENOMEM;
 
-	prop->clk_gears = devm_kcalloc(bus->dev, prop->num_clk_gears,
-			sizeof(*prop->clk_gears), GFP_KERNEL);
-	if (!prop->clk_gears)
-		return -ENOMEM;
-
-	fwnode_property_read_u32_array(link,
-			"mipi-sdw-supported-clock-gears",
-			prop->clk_gears, prop->num_clk_gears);
+		fwnode_property_read_u32_array(link,
+				"mipi-sdw-supported-clock-gears",
+				prop->clk_gears, prop->num_clk_gears);
+	}
 
 	fwnode_property_read_u32(link, "mipi-sdw-default-frame-rate",
 			&prop->default_frame_rate);
@@ -134,18 +132,19 @@ static int sdw_slave_read_dp0(struct sdw_slave *slave,
 
 	nval = fwnode_property_read_u32_array(port,
 			"mipi-sdw-port-wordlength-configs", NULL, 0);
-	if (nval < 0)
-		return -EIO;
+	if (nval > 0) {
 
-	dp0->num_words = nval;
-	dp0->words = devm_kcalloc(&slave->dev,
-			dp0->num_words, sizeof(*dp0->words), GFP_KERNEL);
-	if (!dp0->words)
-		return -ENOMEM;
+		dp0->num_words = nval;
+		dp0->words = devm_kcalloc(&slave->dev,
+				dp0->num_words, sizeof(*dp0->words),
+				GFP_KERNEL);
+		if (!dp0->words)
+			return -ENOMEM;
 
-	fwnode_property_read_u32_array(port,
-			"mipi-sdw-port-wordlength-configs",
-			dp0->words, dp0->num_words);
+		fwnode_property_read_u32_array(port,
+				"mipi-sdw-port-wordlength-configs",
+				dp0->words, dp0->num_words);
+	}
 
 	dp0->flow_controlled = fwnode_property_read_bool(
 			port, "mipi-sdw-bra-flow-controlled");
@@ -191,18 +190,19 @@ int sdw_slave_read_dpn(struct sdw_slave *slave,
 
 		nval = fwnode_property_read_u32_array(node,
 				"mipi-sdw-port-wordlength-configs", NULL, 0);
-		if (nval < 0)
-			return -EIO;
+		if (nval > 0) {
 
-		dpn[i].num_words = nval;
-		dpn[i].words = devm_kcalloc(&slave->dev, dpn[i].num_words,
-				sizeof(*dpn[i].words), GFP_KERNEL);
-		if (!dpn[i].words)
-			return -ENOMEM;
+			dpn[i].num_words = nval;
+			dpn[i].words = devm_kcalloc(&slave->dev,
+					dpn[i].num_words,
+					sizeof(*dpn[i].words), GFP_KERNEL);
+			if (!dpn[i].words)
+				return -ENOMEM;
 
-		fwnode_property_read_u32_array(node,
-				"mipi-sdw-port-wordlength-configs",
-				dpn[i].words, dpn[i].num_words);
+			fwnode_property_read_u32_array(node,
+					"mipi-sdw-port-wordlength-configs",
+					dpn[i].words, dpn[i].num_words);
+		}
 
 		fwnode_property_read_u32(node, "mipi-sdw-data-port-type",
 				&dpn[i].type);
@@ -230,35 +230,36 @@ int sdw_slave_read_dpn(struct sdw_slave *slave,
 
 		nval = fwnode_property_read_u32_array(node,
 				"mipi-sdw-channel-number-list", NULL, 0);
-		if (nval < 0)
-			return -EIO;
+		if (nval > 0) {
 
-		dpn[i].num_ch = nval;
-		dpn[i].ch = devm_kcalloc(&slave->dev, dpn[i].num_ch,
-				sizeof(*dpn[i].ch), GFP_KERNEL);
-		if (!dpn[i].ch)
-			return -ENOMEM;
+			dpn[i].num_ch = nval;
+			dpn[i].ch = devm_kcalloc(&slave->dev, dpn[i].num_ch,
+					sizeof(*dpn[i].ch), GFP_KERNEL);
+			if (!dpn[i].ch)
+				return -ENOMEM;
 
-		fwnode_property_read_u32_array(node,
-				"mipi-sdw-channel-number-list",
-				dpn[i].ch, dpn[i].num_ch);
+			fwnode_property_read_u32_array(node,
+					"mipi-sdw-channel-number-list",
+					dpn[i].ch, dpn[i].num_ch);
+		}
 
 		nval = fwnode_property_read_u32_array(node,
 				"mipi-sdw-channel-combination-list", NULL, 0);
-		if (nval < 0)
-			return -EIO;
+		if (nval > 0) {
 
-		dpn[i].num_ch_combinations = nval;
-		dpn[i].ch_combinations = devm_kcalloc(&slave->dev,
-				dpn[i].num_ch_combinations,
-				sizeof(*dpn[i].ch_combinations), GFP_KERNEL);
-		if (!dpn[i].ch_combinations)
-			return -ENOMEM;
+			dpn[i].num_ch_combinations = nval;
+			dpn[i].ch_combinations = devm_kcalloc(&slave->dev,
+					dpn[i].num_ch_combinations,
+					sizeof(*dpn[i].ch_combinations),
+					GFP_KERNEL);
+			if (!dpn[i].ch_combinations)
+				return -ENOMEM;
 
-		fwnode_property_read_u32_array(node,
-				"mipi-sdw-channel-combination-list",
-				dpn[i].ch_combinations,
-				dpn[i].num_ch_combinations);
+			fwnode_property_read_u32_array(node,
+					"mipi-sdw-channel-combination-list",
+					dpn[i].ch_combinations,
+					dpn[i].num_ch_combinations);
+		}
 
 		fwnode_property_read_u32(node,
 				"mipi-sdw-modes-supported", &dpn[i].modes);
