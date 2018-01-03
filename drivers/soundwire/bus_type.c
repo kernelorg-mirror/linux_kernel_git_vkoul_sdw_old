@@ -181,11 +181,13 @@ static int __init sdw_bus_init(void)
 {
 
 	_sdw_bus_init();
+	sdw_debugfs_init();
 	return bus_register(&sdw_bus_type);
 }
 
 static void __exit sdw_bus_exit(void)
 {
+	sdw_debugfs_exit();
 	bus_unregister(&sdw_bus_type);
 }
 

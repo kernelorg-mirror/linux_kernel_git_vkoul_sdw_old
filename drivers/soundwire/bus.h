@@ -20,6 +20,34 @@ void sdw_extract_slave_id(struct sdw_bus *bus,
 
 extern const struct attribute_group *sdw_slave_dev_attr_groups[];
 
+#ifdef CONFIG_DEBUG_FS
+struct sdw_bus_debugfs *sdw_bus_debugfs_init(struct sdw_bus *bus);
+void sdw_bus_debugfs_exit(struct sdw_bus_debugfs *d);
+struct dentry *sdw_bus_debugfs_get_root(struct sdw_bus_debugfs *d);
+struct sdw_slave_debugfs *sdw_slave_debugfs_init(struct sdw_slave *slave);
+void sdw_slave_debugfs_exit(struct sdw_slave_debugfs *d);
+void sdw_debugfs_init(void);
+void sdw_debugfs_exit(void);
+#else
+struct sdw_bus_debugfs *sdw_bus_debugfs_init(struct sdw_bus *bus)
+{ return NULL; }
+
+void sdw_bus_debugfs_exit(struct sdw_bus_debugfs *d) {}
+
+struct dentry *sdw_bus_debugfs_get_root(struct sdw_bus_debugfs *d)
+{ return NULL; }
+
+struct sdw_slave_debugfs *sdw_slave_debugfs_init(struct sdw_slave *slave)
+{ return NULL; }
+
+void sdw_slave_debugfs_exit(struct sdw_slave_debugfs *d) {}
+
+void sdw_debugfs_init(void) {}
+
+void sdw_debugfs_exit(void) {}
+
+#endif
+
 enum {
 	SDW_MSG_FLAG_READ = 0,
 	SDW_MSG_FLAG_WRITE,
