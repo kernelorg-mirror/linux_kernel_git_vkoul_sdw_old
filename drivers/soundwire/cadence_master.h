@@ -161,6 +161,8 @@ int sdw_cdns_pdi_init(struct sdw_cdns *cdns,
 			struct sdw_cdns_stream_config config);
 int sdw_cdns_enable_interrupt(struct sdw_cdns *cdns);
 
+void sdw_cdns_debugfs_init(struct sdw_cdns *cdns, struct dentry *root);
+
 int sdw_cdns_suspend(struct sdw_cdns *cdns);
 bool sdw_cdns_check_resume_status(struct sdw_cdns *cdns);
 
