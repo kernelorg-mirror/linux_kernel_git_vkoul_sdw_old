@@ -14,6 +14,44 @@
 #include <linux/soundwire/sdw.h>
 #include "bus.h"
 
+/*
+ * Array of supported rows and columns as per MIPI SoundWire Specification 1.1
+ *
+ * The rows are arranged as per the array index value programmed
+ * in register. The index 15 has dummy value 0 in order to fill hole.
+ */
+int rows[SDW_FRAME_ROWS] = {48, 50, 60, 64, 75, 80, 125, 147,
+			96, 100, 120, 128, 150, 160, 250, 0,
+			192, 200, 240, 256, 72, 144, 90, 180};
+
+int cols[SDW_FRAME_COLS] = {2, 4, 6, 8, 10, 12, 14, 16};
+
+static int sdw_find_col_index(int col)
+{
+	int i;
+
+	for (i = 0; i < SDW_FRAME_COLS; i++) {
+		if (cols[i] == col)
+			return i;
+	}
+
+	pr_warn("Requested column not found, selecting lowest column no: 2\n");
+	return 0;
+}
+
+static int sdw_find_row_index(int row)
+{
+	int i;
+
+	for (i = 0; i < SDW_FRAME_ROWS; i++) {
+		if (rows[i] == row)
+			return i;
+	}
+
+	pr_warn("Requested row not found, selecting lowest row no: 48\n");
+	return 0;
+}
+
 static int _sdw_program_slave_port_params(struct sdw_bus *bus,
 				struct sdw_slave *slave,
 				struct sdw_transport_params *t_params,
@@ -471,6 +509,261 @@ static int sdw_prep_deprep_ports(struct sdw_master_runtime *m_rt, bool prep)
 		ret = sdw_prep_deprep_mstr_ports(m_rt, p_rt, prep);
 		if (ret < 0)
 			return ret;
+	}
+
+	return ret;
+}
+
+
+/**
+ * sdw_notify_config: Notify bus configuration
+ *
+ * @m_rt: Master runtime handle
+ */
+static int sdw_notify_config(struct sdw_master_runtime *m_rt)
+{
+	struct sdw_slave_runtime *s_rt;
+	struct sdw_bus *bus = m_rt->bus;
+	struct sdw_slave *slave;
+	int ret = 0;
+
+	if (bus->ops->set_bus_conf) {
+		ret = bus->ops->set_bus_conf(bus, &bus->params);
+		if (ret < 0)
+			return ret;
+	}
+
+	list_for_each_entry(s_rt, &m_rt->slave_list, m_rt_node) {
+		slave = s_rt->slave;
+
+		if (slave->ops->bus_config) {
+			ret = slave->ops->bus_config(slave, &bus->params);
+			if (ret < 0)
+				dev_err(bus->dev, "Notify Slave: %d failed",
+								slave->dev_num);
+			return ret;
+		}
+	}
+
+	return ret;
+}
+
+/**
+ * sdw_program_params: Program transport and port parameters for Master(s)
+ * and Slave(s)
+ *
+ * @bus: SDW bus instance
+ */
+static int sdw_program_params(struct sdw_bus *bus)
+{
+	struct sdw_master_runtime *m_rt = NULL;
+	int ret = 0;
+
+	list_for_each_entry(m_rt, &bus->m_rt_list, bus_node) {
+		ret = sdw_program_port_params(m_rt);
+		if (ret < 0) {
+			dev_err(bus->dev,
+				"Program transport params failed: %d", ret);
+			return ret;
+		}
+
+		ret = sdw_notify_config(m_rt);
+		if (ret < 0) {
+			dev_err(bus->dev, "Notify bus config failed: %d", ret);
+			return ret;
+		}
+
+		/* Enable port(s) on alternate bank for all active streams */
+		if (m_rt->stream->state != SDW_STREAM_ENABLE)
+			continue;
+
+		ret = sdw_enable_disable_ports(m_rt, true);
+		if (ret < 0) {
+			dev_err(bus->dev, "Enable channel failed: %d", ret);
+			return ret;
+		}
+	}
+
+	return ret;
+}
+
+static int _sdw_bank_switch(struct sdw_bus *bus)
+{
+	int link_mask = bus->link_sync_mask;
+	int col_index, row_index;
+	struct sdw_msg *wr_msg;
+	u8 *wbuf = NULL;
+	int ret = 0;
+	u16 addr;
+
+	wr_msg = kzalloc(sizeof(*wr_msg), GFP_KERNEL);
+	if (!wr_msg)
+		return -ENOMEM;
+
+	bus->defer_msg.msg = wr_msg;
+	wbuf = kzalloc(sizeof(*wbuf), GFP_KERNEL);
+	if (!wbuf) {
+		ret = -ENOMEM;
+		goto error;
+	}
+
+	/* Get row and column index to program register */
+	col_index = sdw_find_col_index(bus->params.col);
+	row_index = sdw_find_row_index(bus->params.row);
+	wbuf[0] = col_index | (row_index << 3);
+
+	if (bus->params.next_bank)
+		addr = SDW_SCP_FRAMECTRL_B1;
+	else
+		addr = SDW_SCP_FRAMECTRL_B0;
+
+	sdw_fill_msg(wr_msg, NULL, addr, 1, SDW_BROADCAST_DEV_NUM,
+					SDW_MSG_FLAG_WRITE, wbuf);
+	wr_msg->ssp_sync = true;
+
+	if (link_mask) {
+		/*
+		 * Acquire message lock. The lock will be released in
+		 * sdw_ml_sync_bank_switch function.
+		 */
+		mutex_lock(&bus->msg_lock);
+		ret = sdw_transfer_defer(bus, wr_msg, &bus->defer_msg);
+		if (ret < 0) {
+			dev_err(bus->dev, "Slave frame_ctrl reg write failed");
+			goto defer_error;
+		}
+	} else {
+		ret = sdw_transfer(bus, wr_msg);
+		if (ret < 0) {
+			dev_err(bus->dev, "Slave frame_ctrl reg write failed");
+			goto error;
+		}
+	}
+
+
+	if (!link_mask) {
+		kfree(wr_msg);
+		kfree(wbuf);
+		bus->defer_msg.msg = NULL;
+		bus->params.curr_bank = !bus->params.curr_bank;
+		bus->params.next_bank = !bus->params.next_bank;
+	}
+
+	return 0;
+
+defer_error:
+	mutex_unlock(&bus->msg_lock);
+
+error:
+	kfree(wr_msg);
+	kfree(wbuf);
+	return ret;
+}
+
+static int sdw_bank_switch(struct sdw_bus *bus)
+{
+	const struct sdw_master_ops *ops = bus->ops;
+	int ret = 0;
+
+	/* Pre-bank switch */
+	if (ops->pre_bank_switch) {
+		ret = ops->pre_bank_switch(bus);
+		if (ret < 0) {
+			dev_err(bus->dev, "Pre bank switch op failed: %d", ret);
+			return ret;
+		}
+	}
+
+	/* Bank-switch */
+	ret = _sdw_bank_switch(bus);
+	if (ret < 0) {
+		dev_err(bus->dev, "Bank switch op failed: %d", ret);
+		return ret;
+	}
+
+	return ret;
+}
+
+/**
+ * sdw_ml_sync_bank_switch: Multilink register bank switch
+ *
+ * @bus: SDW bus instance
+ */
+static int sdw_ml_sync_bank_switch(struct sdw_bus *bus)
+{
+	int link_mask = bus->link_sync_mask;
+	unsigned long time_left;
+	int ret = 0;
+
+	if (!link_mask)
+		return ret;
+
+	/* Wait on completion for transfer complete */
+	time_left = wait_for_completion_timeout(
+			&bus->defer_msg.complete,
+			bus->bank_switch_timeout);
+
+	if (!time_left) {
+		dev_err(bus->dev, "Controller Timed out");
+		return -ETIMEDOUT;
+	}
+
+	bus->params.curr_bank = !bus->params.curr_bank;
+	bus->params.next_bank = !bus->params.next_bank;
+
+
+	if (bus->defer_msg.msg) {
+		kfree(bus->defer_msg.msg->buf);
+		kfree(bus->defer_msg.msg);
+	}
+	/* Release message lock acquired before sdw_transfer_defer */
+	mutex_unlock(&bus->msg_lock);
+	return ret;
+}
+
+static int sdw_post_bank_switch(struct sdw_stream_runtime *stream)
+{
+	struct sdw_master_runtime *m_rt = NULL;
+	const struct sdw_master_ops *ops;
+	struct sdw_bus *bus = NULL;
+	int ret = 0;
+
+	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
+		bus = m_rt->bus;
+		ops = bus->ops;
+
+		/* Post-bank switch */
+		if (ops->post_bank_switch) {
+			ret = ops->post_bank_switch(bus);
+			if (ret < 0) {
+				dev_err(bus->dev,
+					"Post bank switch op failed: %d", ret);
+				return ret;
+			}
+		}
+
+		/* Wait for multilink bank-switch */
+		ret = sdw_ml_sync_bank_switch(bus);
+		if (ret < 0) {
+			dev_err(bus->dev,
+				"Multilink bank switch failed: %d", ret);
+			goto error;
+		}
+	}
+
+	return ret;
+
+error:
+	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
+
+		bus = m_rt->bus;
+
+		kfree(bus->defer_msg.msg->buf);
+		kfree(bus->defer_msg.msg);
+
+		if (mutex_is_locked(&bus->msg_lock))
+			mutex_unlock(&bus->msg_lock);
+
 	}
 
 	return ret;
