@@ -2882,6 +2882,24 @@ int snd_soc_dai_set_tdm_slot(struct snd_soc_dai *dai,
 EXPORT_SYMBOL_GPL(snd_soc_dai_set_tdm_slot);
 
 /**
+ * snd_soc_dai_set_sdw_stream() - Configures a DAI for SDW stream operation
+ * @dai: The DAI to configure
+ * @stream: Stream pointer
+ * @direction: Stream direction(Playback/Capture)
+ *
+ * Returns 0 on success, a negative error code otherwise.
+ */
+int snd_soc_dai_set_sdw_stream(struct snd_soc_dai *dai,
+				void *stream, int direction)
+{
+	if (dai->driver->ops->set_sdw_stream)
+		return dai->driver->ops->set_sdw_stream(dai, stream, direction);
+	else
+		return -ENOTSUPP;
+}
+EXPORT_SYMBOL_GPL(snd_soc_dai_set_sdw_stream);
+
+/**
  * snd_soc_dai_set_channel_map - configure DAI audio channel map
  * @dai: DAI
  * @tx_num: how many TX channels
