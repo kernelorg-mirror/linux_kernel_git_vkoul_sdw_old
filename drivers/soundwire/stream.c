@@ -490,3 +490,36 @@ error:
 	return ret;
 }
 EXPORT_SYMBOL(sdw_stream_add_slave);
+
+/**
+ * sdw_get_slave_dpn_prop: Get Slave port capabilities
+ *
+ * @slave: Slave handle
+ * @direction: Data direction.
+ * @port_num: Port number
+ */
+struct sdw_dpn_prop *sdw_get_slave_dpn_prop(struct sdw_slave *slave,
+				enum sdw_data_direction direction,
+				unsigned int port_num)
+{
+	struct sdw_dpn_prop *dpn_prop;
+	u8 num_ports;
+	int i;
+
+	if (direction == SDW_DATA_DIR_OUT) {
+		num_ports = hweight32(slave->prop.source_ports);
+		dpn_prop = slave->prop.src_dpn_prop;
+	} else {
+		num_ports = hweight32(slave->prop.sink_ports);
+		dpn_prop = slave->prop.sink_dpn_prop;
+	}
+
+	for (i = 0; i < num_ports; i++) {
+		dpn_prop = &dpn_prop[i];
+
+		if (dpn_prop->num == port_num)
+			return &dpn_prop[i];
+	}
+
+	return NULL;
+}
