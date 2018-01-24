@@ -45,6 +45,47 @@ struct sdw_msg {
 	bool page;
 };
 
+/**
+ * sdw_slave_runtime: Runtime Stream parameters for Slave
+ *
+ * @slave: Slave handle
+ * @direction: Data direction w.r.t Slave Port(s)
+ * @ch_count: Channel count of the Slave w.r.t stream
+ * @m_rt_node: Node to be added in sdw_master_runtime slave_list which
+ * maintains list of Slave runtime associated with Master runtime for
+ * this stream
+ */
+struct sdw_slave_runtime {
+	struct sdw_slave *slave;
+	enum sdw_data_direction direction;
+	unsigned int ch_count;
+	struct list_head m_rt_node;
+};
+
+/**
+ * sdw_master_runtime: Runtime stream parameters for Master
+ *
+ * @bus: Bus handle
+ * @stream: Stream runtime handle
+ * @direction: Data direction w.r.t Master Port(s)
+ * @ch_count: Channel count of the Master w.r.t stream
+ * @slave_list: List of the Slave runtime associated with this
+ * Master for stream
+ * @stream_node: Node to be added in sdw_stream_runtime master
+ * runtime list which maintains list of Master(s) part of stream
+ * @bus_node: Node to be added in sdw_bus rt_list which maintains list
+ * of Master runtime instance of all stream(s) running on Bus
+ */
+struct sdw_master_runtime {
+	struct sdw_bus *bus;
+	struct sdw_stream_runtime *stream;
+	enum sdw_data_direction direction;
+	unsigned int ch_count;
+	struct list_head slave_list;
+	struct list_head stream_node;
+	struct list_head bus_node;
+};
+
 int sdw_transfer(struct sdw_bus *bus, struct sdw_msg *msg);
 int sdw_transfer_defer(struct sdw_bus *bus, struct sdw_msg *msg,
 				struct sdw_defer *defer);
