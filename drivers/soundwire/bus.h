@@ -46,6 +46,7 @@ struct sdw_msg {
 };
 
 #define SDW_DOUBLE_RATE_FACTOR		2
+#define SDW_FREQ_MOD_FACTOR		3000
 
 extern int rows[SDW_FRAME_ROWS];
 extern int cols[SDW_FRAME_COLS];
@@ -119,6 +120,11 @@ struct sdw_master_runtime {
 	struct list_head stream_node;
 	struct list_head bus_node;
 };
+
+int _sdw_prepare_stream(struct sdw_stream_runtime *stream);
+int _sdw_enable_stream(struct sdw_stream_runtime *stream);
+int _sdw_deprepare_stream(struct sdw_stream_runtime *stream);
+int _sdw_disable_stream(struct sdw_stream_runtime *stream);
 
 struct sdw_dpn_prop *sdw_get_slave_dpn_prop(struct sdw_slave *slave,
 				enum sdw_data_direction direction,
