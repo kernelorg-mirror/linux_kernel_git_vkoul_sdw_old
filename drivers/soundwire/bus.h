@@ -46,12 +46,36 @@ struct sdw_msg {
 };
 
 /**
+ * sdw_port_runtime: Runtime port parameters for Master or Slave
+ *
+ * @num: Port number. For audio streams, valid port number ranges from
+ * [1,14]
+ * @ch_mask: Channel mask
+ * @transport_params: Transport parameters
+ * @port_params: Port parameters
+ * @port_node: List node for Master or Slave port_list
+ *
+ * SoundWire spec has no mention of ports for Master interface but the
+ * concept is logically extended.
+ */
+struct sdw_port_runtime {
+	int num;
+	int ch_mask;
+	struct sdw_transport_params transport_params;
+	struct sdw_port_params port_params;
+	struct list_head port_node;
+};
+
+/**
  * sdw_slave_runtime: Runtime Stream parameters for Slave
  *
  * @slave: Slave handle
  * @direction: Data direction w.r.t Slave Port(s)
  * @ch_count: Channel count of the Slave w.r.t stream
  * @m_rt_node: Node to be added in sdw_master_runtime slave_list which
+ * @port_list: List of Slave Ports for this Stream. This list is
+ * used for computing and programming transport parameters, port
+ * parameters, prepare, enable, disable and de-prepare of Slave port
  * maintains list of Slave runtime associated with Master runtime for
  * this stream
  */
@@ -60,6 +84,7 @@ struct sdw_slave_runtime {
 	enum sdw_data_direction direction;
 	unsigned int ch_count;
 	struct list_head m_rt_node;
+	struct list_head port_list;
 };
 
 /**
@@ -69,6 +94,9 @@ struct sdw_slave_runtime {
  * @stream: Stream runtime handle
  * @direction: Data direction w.r.t Master Port(s)
  * @ch_count: Channel count of the Master w.r.t stream
+ * @port_list: List of Master Ports for this Stream. This list is
+ * used for computing and programming transport parameters, port
+ * parameters of Master port
  * @slave_list: List of the Slave runtime associated with this
  * Master for stream
  * @stream_node: Node to be added in sdw_stream_runtime master
@@ -81,6 +109,7 @@ struct sdw_master_runtime {
 	struct sdw_stream_runtime *stream;
 	enum sdw_data_direction direction;
 	unsigned int ch_count;
+	struct list_head port_list;
 	struct list_head slave_list;
 	struct list_head stream_node;
 	struct list_head bus_node;
