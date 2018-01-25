@@ -1,0 +1,17 @@
+What:		/sys/bus/soundwire/devices/sdw-master-N/clk_stop_mode
+		/sys/bus/soundwire/devices/sdw-master-N/clock_frequencies
+		/sys/bus/soundwire/devices/sdw-master-N/clock_gears
+		/sys/bus/soundwire/devices/sdw-master-N/default_col
+		/sys/bus/soundwire/devices/sdw-master-N/default_row
+		/sys/bus/soundwire/devices/sdw-master-N/dynamic_frame
+		/sys/bus/soundwire/devices/sdw-master-N/err_threshold
+		/sys/bus/soundwire/devices/sdw-master-N/max_freq
+
+Date:		Jaunuary 2018
+
+Contact:	Vinod Koul <vinod.koul@intel.com>
+
+Description:	SoundWire Master-N DisCo properties.
+		These properties are defined by MIPI DisCo Specification
+		for SoundWire. They define various properties of the Master
+		and are used by the bus to configure the Master.
