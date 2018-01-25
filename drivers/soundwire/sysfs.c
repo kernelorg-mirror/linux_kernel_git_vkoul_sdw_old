@@ -153,3 +153,303 @@ void sdw_sysfs_bus_exit(struct sdw_bus *bus)
 	put_device(&master->dev);
 	bus->sysfs = NULL;
 }
+
+/*
+ * Slave sysfs
+ */
+
+/*
+ * The sysfs for Slave reflects the MIPI description as given
+ * in the MIPI DisCo spec
+ *
+ * Base file is device
+ *	|---- mipi_revision
+ *	|---- wake_capable
+ *	|---- test_mode_capable
+ *	|---- simple_clk_stop_capable
+ *	|---- clk_stop_timeout
+ *	|---- ch_prep_timeout
+ *	|---- reset_behave
+ *	|---- high_PHY_capable
+ *	|---- paging_support
+ *	|---- bank_delay_support
+ *	|---- p15_behave
+ *	|---- master_count
+ *	|---- source_ports
+ *	|---- sink_ports
+ *	|---- dp0
+ *		|---- max_word
+ *		|---- min_word
+ *		|---- words
+ *		|---- flow_controlled
+ *		|---- simple_ch_prep_sm
+ *		|---- device_interrupts
+ *	|---- dpN
+ *		|---- max_word
+ *		|---- min_word
+ *		|---- words
+ *		|---- type
+ *		|---- max_grouping
+ *		|---- simple_ch_prep_sm
+ *		|---- ch_prep_timeout
+ *		|---- device_interrupts
+ *		|---- max_ch
+ *		|---- min_ch
+ *		|---- ch
+ *		|---- ch_combinations
+ *		|---- modes
+ *		|---- max_async_buffer
+ *		|---- block_pack_mode
+ *		|---- port_encoding
+ *		|---- bus_min_freq
+ *		|---- bus_max_freq
+ *		|---- bus_freq
+ *		|---- max_freq
+ *		|---- min_freq
+ *		|---- freq
+ *		|---- prep_ch_behave
+ *		|---- glitchless
+ *
+ */
+
+#define SLAVE_ATTR(type)					\
+static ssize_t type##_show(struct device *dev,			\
+		struct device_attribute *attr, char *buf)	\
+{								\
+	struct sdw_slave *slave = dev_to_sdw_dev(dev);		\
+	return sprintf(buf, "0x%x\n", slave->prop.type);	\
+}								\
+static DEVICE_ATTR_RO(type)
+
+SLAVE_ATTR(mipi_revision);
+SLAVE_ATTR(wake_capable);
+SLAVE_ATTR(test_mode_capable);
+SLAVE_ATTR(clk_stop_mode1);
+SLAVE_ATTR(simple_clk_stop_capable);
+SLAVE_ATTR(clk_stop_timeout);
+SLAVE_ATTR(ch_prep_timeout);
+SLAVE_ATTR(reset_behave);
+SLAVE_ATTR(high_PHY_capable);
+SLAVE_ATTR(paging_support);
+SLAVE_ATTR(bank_delay_support);
+SLAVE_ATTR(p15_behave);
+SLAVE_ATTR(master_count);
+SLAVE_ATTR(source_ports);
+SLAVE_ATTR(sink_ports);
+
+static ssize_t modalias_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+
+	return sdw_slave_modalias(slave, buf, 256);
+}
+static DEVICE_ATTR_RO(modalias);
+
+static struct attribute *slave_dev_attrs[] = {
+	&dev_attr_mipi_revision.attr,
+	&dev_attr_wake_capable.attr,
+	&dev_attr_test_mode_capable.attr,
+	&dev_attr_clk_stop_mode1.attr,
+	&dev_attr_simple_clk_stop_capable.attr,
+	&dev_attr_clk_stop_timeout.attr,
+	&dev_attr_ch_prep_timeout.attr,
+	&dev_attr_reset_behave.attr,
+	&dev_attr_high_PHY_capable.attr,
+	&dev_attr_paging_support.attr,
+	&dev_attr_bank_delay_support.attr,
+	&dev_attr_p15_behave.attr,
+	&dev_attr_master_count.attr,
+	&dev_attr_source_ports.attr,
+	&dev_attr_sink_ports.attr,
+	&dev_attr_modalias.attr,
+	NULL,
+};
+
+static struct attribute_group sdw_slave_dev_attr_group = {
+	.attrs	= slave_dev_attrs,
+};
+
+const struct attribute_group *sdw_slave_dev_attr_groups[] = {
+	&sdw_slave_dev_attr_group,
+	NULL
+};
+
+/*
+ * DP0 sysfs
+ */
+
+struct sdw_dp0_sysfs {
+	struct device dev;
+	struct sdw_dp0_prop *dp0;
+};
+
+#define to_sdw_dp0(_dev) \
+	container_of(_dev, struct sdw_dp0_sysfs, dev)
+
+struct sdw_dp0_attribute {
+	struct attribute attr;
+	ssize_t (*show)(struct sdw_slave *slave,
+			struct sdw_dp0_prop *dp0, char *buf);
+};
+
+static ssize_t word_bits_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct sdw_dp0_sysfs *sysfs = to_sdw_dp0(dev);	\
+	ssize_t size = 0;
+	int i;
+
+	for (i = 0; i < sysfs->dp0->num_words; i++)
+		size += sprintf(buf + size, "%d ", sysfs->dp0->words[i]);
+	size += sprintf(buf + size, "\n");
+
+	return size;
+}
+static DEVICE_ATTR_RO(word_bits);
+
+static ssize_t min_word_bits_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct sdw_dp0_sysfs *sysfs = to_sdw_dp0(dev);
+
+	return sprintf(buf, "%d\n", sysfs->dp0->min_word);
+}
+static DEVICE_ATTR_RO(min_word_bits);
+
+static ssize_t max_word_bits_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct sdw_dp0_sysfs *sysfs = to_sdw_dp0(dev);
+
+	return sprintf(buf, "%d\n", sysfs->dp0->max_word);
+}
+static DEVICE_ATTR_RO(max_word_bits);
+
+static ssize_t flow_controlled_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct sdw_dp0_sysfs *sysfs = to_sdw_dp0(dev);
+
+	return sprintf(buf, "%d\n", sysfs->dp0->flow_controlled);
+}
+static DEVICE_ATTR_RO(flow_controlled);
+
+static ssize_t ch_prep_sm_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct sdw_dp0_sysfs *sysfs = to_sdw_dp0(dev);
+
+	return sprintf(buf, "%d\n", sysfs->dp0->simple_ch_prep_sm);
+}
+static DEVICE_ATTR_RO(ch_prep_sm);
+
+static ssize_t impl_def_interrupts_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct sdw_dp0_sysfs *sysfs = to_sdw_dp0(dev);
+
+	return sprintf(buf, "%d\n", sysfs->dp0->device_interrupts);
+}
+static DEVICE_ATTR_RO(impl_def_interrupts);
+
+static struct attribute *dp0_attrs[] = {
+	&dev_attr_word_bits.attr,
+	&dev_attr_min_word_bits.attr,
+	&dev_attr_max_word_bits.attr,
+	&dev_attr_flow_controlled.attr,
+	&dev_attr_ch_prep_sm.attr,
+	&dev_attr_impl_def_interrupts.attr,
+	NULL,
+};
+
+static const struct attribute_group dp0_group = {
+	.attrs = dp0_attrs,
+};
+
+static const struct attribute_group *dp0_groups[] = {
+	&dp0_group,
+	NULL
+};
+
+static void sdw_dp0_release(struct device *dev)
+{
+	struct sdw_dp0_sysfs *sysfs = to_sdw_dp0(dev);
+
+	kfree(sysfs);
+}
+
+static struct device_type sdw_dp0_type = {
+	.name =	"sdw_dp0",
+	.release = sdw_dp0_release,
+};
+
+struct sdw_slave_sysfs {
+	struct sdw_slave *slave;
+	struct sdw_dp0_sysfs *dp0;
+
+};
+
+int sdw_sysfs_slave_init(struct sdw_slave *slave)
+{
+	struct sdw_slave_sysfs *sysfs;
+	int err;
+
+	if (slave->sysfs) {
+		dev_err(&slave->dev, "SDW Slave sysfs is already initialized\n");
+		err = -EIO;
+		goto err_ret;
+	}
+
+	sysfs = slave->sysfs = kzalloc(sizeof(*sysfs), GFP_KERNEL);
+	if (!sysfs) {
+		err =-ENOMEM;
+		goto err_ret;
+	}
+
+	sysfs->slave = slave;
+
+	if (slave->prop.dp0_prop) {
+		struct sdw_dp0_sysfs *dp0;
+
+		dp0 = kzalloc(sizeof(*dp0), GFP_KERNEL);
+		if (!dp0) {
+			err = -ENOMEM;
+			goto err_free_sysfs;
+		}
+
+		dp0->dev.type = &sdw_dp0_type;
+		dp0->dev.parent = &slave->dev;
+		dp0->dev.groups = dp0_groups;
+		dp0->dp0 = slave->prop.dp0_prop;
+		dev_set_name(&dp0->dev, "dp0");
+		err = device_register(&dp0->dev);
+		if (err)
+			goto err_put_dp0;
+
+		sysfs->dp0 = dp0;
+	}
+
+	return 0;
+
+err_put_dp0:
+	put_device(&sysfs->dp0->dev);
+err_free_sysfs:
+	kfree(sysfs);
+	sysfs->slave = NULL;
+err_ret:
+	return err;
+
+}
+
+void sdw_sysfs_slave_exit(struct sdw_slave *slave)
+{
+	struct sdw_slave_sysfs *sysfs = slave->sysfs;
+
+	if (!sysfs)
+		return;
+
+	put_device(&sysfs->dp0->dev);
+	kfree(sysfs);
+	slave->sysfs = NULL;
+}

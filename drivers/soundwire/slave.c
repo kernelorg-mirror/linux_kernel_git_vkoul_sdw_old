@@ -34,6 +34,7 @@ static int sdw_slave_add(struct sdw_bus *bus,
 			id->class_id, id->unique_id);
 
 	slave->dev.release = sdw_slave_release;
+	slave->dev.groups = sdw_slave_dev_attr_groups;
 	slave->dev.bus = &sdw_bus_type;
 	slave->bus = bus;
 	slave->status = SDW_SLAVE_UNATTACHED;

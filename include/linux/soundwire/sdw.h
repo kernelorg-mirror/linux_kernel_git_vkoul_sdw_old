@@ -404,10 +404,13 @@ int sdw_slave_read_prop(struct sdw_slave *slave);
 /*
  * SDW sysfs APIs
  */
+struct sdw_slave_sysfs;
 struct sdw_master_sysfs;
 
 int sdw_sysfs_bus_init(struct sdw_bus *bus);
 void sdw_sysfs_bus_exit(struct sdw_bus *bus);
+int sdw_sysfs_slave_init(struct sdw_slave *slave);
+void sdw_sysfs_slave_exit(struct sdw_slave *slave);
 
 /*
  * SDW Slave Structures and APIs
@@ -550,6 +553,7 @@ struct sdw_slave_ops {
  * @bus: Bus handle
  * @ops: Slave callback ops
  * @prop: Slave properties
+ * @sysfs: Sysfs interface
  * @node: node for bus list
  * @port_ready: Port ready completion flag for each Slave port
  * @dev_num: Device Number assigned by Bus
@@ -561,6 +565,7 @@ struct sdw_slave {
 	struct sdw_bus *bus;
 	const struct sdw_slave_ops *ops;
 	struct sdw_slave_prop prop;
+	struct sdw_slave_sysfs *sysfs;
 	struct list_head node;
 	struct completion *port_ready;
 	u16 dev_num;
