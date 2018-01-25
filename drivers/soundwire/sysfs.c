@@ -276,6 +276,132 @@ const struct attribute_group *sdw_slave_dev_attr_groups[] = {
 };
 
 /*
+ * DP-N properties
+ */
+struct sdw_dpn_sysfs {
+	struct device dev;
+	struct sdw_dpn_prop *dpn;
+};
+
+#define to_sdw_dpn(_dev) \
+	container_of(_dev, struct sdw_dpn_sysfs, dev)
+
+#define sdw_dpn_attr(field, format_string)			\
+static ssize_t field##_show(struct device *dev,			\
+			       struct device_attribute *attr,	\
+			       char *buf)			\
+{								\
+	struct sdw_dpn_sysfs *sysfs = to_sdw_dpn(dev);	\
+	return sprintf(buf, format_string, sysfs->dpn->field);	\
+}								\
+static DEVICE_ATTR_RO(field)
+
+sdw_dpn_attr(max_word, "%d\n");
+sdw_dpn_attr(min_word, "%d\n");
+sdw_dpn_attr(max_grouping, "%d\n");
+sdw_dpn_attr(device_interrupts, "%d\n");
+sdw_dpn_attr(max_ch, "%d\n");
+sdw_dpn_attr(min_ch, "%d\n");
+sdw_dpn_attr(modes, "%d\n");
+sdw_dpn_attr(max_async_buffer, "%d\n");
+sdw_dpn_attr(block_pack_mode, "%d\n");
+sdw_dpn_attr(port_encoding, "%d\n");
+
+static ssize_t slave_ch_prep_timeout_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct sdw_dpn_sysfs *sysfs = to_sdw_dpn(dev);	\
+
+	return sprintf(buf, "%d ", sysfs->dpn->ch_prep_timeout);
+}
+static DEVICE_ATTR_RO(slave_ch_prep_timeout);
+
+static ssize_t words_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct sdw_dpn_sysfs *sysfs = to_sdw_dpn(dev);	\
+	ssize_t size = 0;
+	int i;
+
+	for (i = 0; i < sysfs->dpn->num_words; i++)
+		size += sprintf(buf + size, "%d ", sysfs->dpn->words[i]);
+	size += sprintf(buf + size, "\n");
+
+	return size;
+}
+static DEVICE_ATTR_RO(words);
+
+static ssize_t channels_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct sdw_dpn_sysfs *sysfs = to_sdw_dpn(dev);	\
+	ssize_t size = 0;
+	int i;
+
+	for (i = 0; i < sysfs->dpn->num_ch; i++)
+		size += sprintf(buf + size, "%d ", sysfs->dpn->ch[i]);
+	size += sprintf(buf + size, "\n");
+
+	return size;
+}
+static DEVICE_ATTR_RO(channels);
+
+static ssize_t ch_combinations_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct sdw_dpn_sysfs *sysfs = to_sdw_dpn(dev);	\
+	ssize_t size = 0;
+	int i;
+
+	for (i = 0; i < sysfs->dpn->num_ch_combinations; i++)
+		size += sprintf(buf + size, "%d ",
+				sysfs->dpn->ch_combinations[i]);
+	size += sprintf(buf + size, "\n");
+
+	return size;
+}
+static DEVICE_ATTR_RO(ch_combinations);
+
+static struct attribute *dpn_attrs[] = {
+	&dev_attr_max_word.attr,
+	&dev_attr_min_word.attr,
+	&dev_attr_max_grouping.attr,
+	&dev_attr_device_interrupts.attr,
+	&dev_attr_max_ch.attr,
+	&dev_attr_min_ch.attr,
+	&dev_attr_modes.attr,
+	&dev_attr_max_async_buffer.attr,
+	&dev_attr_block_pack_mode.attr,
+	&dev_attr_port_encoding.attr,
+	&dev_attr_slave_ch_prep_timeout.attr,
+	&dev_attr_words.attr,
+	&dev_attr_channels.attr,
+	&dev_attr_ch_combinations.attr,
+	NULL,
+};
+
+static const struct attribute_group dpn_group = {
+	.attrs = dpn_attrs,
+};
+
+static const struct attribute_group *dpn_groups[] = {
+	&dpn_group,
+	NULL
+};
+
+static void sdw_dpn_release(struct device *dev)
+{
+	struct sdw_dpn_sysfs *sysfs = to_sdw_dpn(dev);
+
+	kfree(sysfs);
+}
+
+static struct device_type sdw_dpn_type = {
+	.name =	"sdw_dpn",
+	.release = sdw_dpn_release,
+};
+
+/*
  * DP0 sysfs
  */
 
@@ -387,12 +513,54 @@ static struct device_type sdw_dp0_type = {
 struct sdw_slave_sysfs {
 	struct sdw_slave *slave;
 	struct sdw_dp0_sysfs *dp0;
+	unsigned int num_dpns;
+	struct sdw_dpn_sysfs **dpns;
 
 };
+
+static struct sdw_dpn_sysfs *sdw_sysfs_slave_dpn_init(
+		struct sdw_slave *slave, struct sdw_dpn_prop *prop, bool src)
+{
+	struct sdw_dpn_sysfs *dpn;
+	int err;
+
+	dpn = kzalloc(sizeof(*dpn), GFP_KERNEL);
+	if (!dpn)
+		return NULL;
+
+	dpn->dev.type = &sdw_dpn_type;
+	dpn->dev.parent = &slave->dev;
+	dpn->dev.groups = dpn_groups;
+	dpn->dpn = prop;
+
+	if (src)
+		dev_set_name(&dpn->dev, "src-dp%x", prop->num);
+	else
+		dev_set_name(&dpn->dev, "sink-dp%x", prop->num);
+
+	err = device_register(&dpn->dev);
+	if (err) {
+		put_device(&dpn->dev);
+		dpn = NULL;
+	}
+
+	return dpn;
+}
+
+static void sdw_sysfs_slave_dpn_exit(struct sdw_slave_sysfs *sysfs)
+{
+	int i;
+
+	for (i = 0; i < sysfs->num_dpns; i++) {
+		if (sysfs->dpns[i])
+			put_device(&sysfs->dpns[i]->dev);
+	}
+}
 
 int sdw_sysfs_slave_init(struct sdw_slave *slave)
 {
 	struct sdw_slave_sysfs *sysfs;
+	unsigned int src_dpns, sink_dpns, i, j;
 	int err;
 
 	if (slave->sysfs) {
@@ -430,8 +598,38 @@ int sdw_sysfs_slave_init(struct sdw_slave *slave)
 		sysfs->dp0 = dp0;
 	}
 
+	src_dpns = hweight32(slave->prop.source_ports);
+	sink_dpns = hweight32(slave->prop.sink_ports);
+	sysfs->num_dpns = src_dpns + sink_dpns;
+
+	sysfs->dpns = kcalloc(sysfs->num_dpns, sizeof(**sysfs->dpns), GFP_KERNEL);
+	if (!sysfs->dpns) {
+		err = -ENOMEM;
+		goto err_put_dp0;
+	}
+
+
+	for (i = 0; i < src_dpns; i++) {
+		sysfs->dpns[i] = sdw_sysfs_slave_dpn_init(
+				slave, &slave->prop.src_dpn_prop[i], true);
+		if (!sysfs->dpns[i]) {
+			err = -ENOMEM;
+			goto err_dpn;
+		}
+	}
+
+	for (j = 0; j < sink_dpns; j++) {
+		sysfs->dpns[i + j] = sdw_sysfs_slave_dpn_init(
+				slave, &slave->prop.sink_dpn_prop[j], false);
+		if (!sysfs->dpns[i + j]) {
+			err = -ENOMEM;
+			goto err_dpn;
+		}
+	}
 	return 0;
 
+err_dpn:
+	sdw_sysfs_slave_dpn_exit(sysfs);
 err_put_dp0:
 	put_device(&sysfs->dp0->dev);
 err_free_sysfs:
@@ -449,6 +647,8 @@ void sdw_sysfs_slave_exit(struct sdw_slave *slave)
 	if (!sysfs)
 		return;
 
+	sdw_sysfs_slave_dpn_exit(sysfs);
+	kfree(sysfs->dpns);
 	put_device(&sysfs->dp0->dev);
 	kfree(sysfs);
 	slave->sysfs = NULL;
