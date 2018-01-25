@@ -403,6 +403,14 @@ int sdw_master_read_prop(struct sdw_bus *bus);
 int sdw_slave_read_prop(struct sdw_slave *slave);
 
 /*
+ * SDW sysfs APIs
+ */
+struct sdw_master_sysfs;
+
+int sdw_sysfs_bus_init(struct sdw_bus *bus);
+void sdw_sysfs_bus_exit(struct sdw_bus *bus);
+
+/*
  * SDW Slave Structures and APIs
  */
 
@@ -729,6 +737,7 @@ struct sdw_master_ops {
  * @params: Current bus parameters
  * @prop: Master properties
  * @m_rt_list: List of Master instance of all stream(s) running on Bus. This
+ * @sysfs: Bus sysfs
  * is used to compute and program bus bandwidth, clock, frame shape,
  * transport and port parameters
  * @link_sync_mask: sync mask value
@@ -749,6 +758,7 @@ struct sdw_bus {
 	struct sdw_bus_params params;
 	struct sdw_master_prop prop;
 	struct list_head m_rt_list;
+	struct sdw_master_sysfs *sysfs;
 	unsigned int link_sync_mask;
 	struct sdw_defer defer_msg;
 	unsigned int clk_stop_timeout;

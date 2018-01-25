@@ -46,6 +46,8 @@ int sdw_add_bus_master(struct sdw_bus *bus)
 	if (!bus->compute_params)
 		bus->compute_params = &sdw_compute_params;
 
+	sdw_sysfs_bus_init(bus);
+
 	/*
 	 * Device numbers in SoundWire are 0 thru 15. Enumeration device
 	 * number (0), Broadcast device number (15), Group numbers (12 and
@@ -124,6 +126,8 @@ static int sdw_delete_slave(struct device *dev, void *data)
  */
 void sdw_delete_bus_master(struct sdw_bus *bus)
 {
+	sdw_sysfs_bus_exit(bus);
+
 	device_for_each_child(bus->dev, NULL, sdw_delete_slave);
 }
 EXPORT_SYMBOL(sdw_delete_bus_master);
