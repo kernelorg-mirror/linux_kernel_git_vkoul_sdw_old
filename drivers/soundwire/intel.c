@@ -12,6 +12,7 @@
 #include <linux/soundwire/sdw_registers.h>
 #include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_intel.h>
+#include <sound/soc.h>
 #include "cadence_master.h"
 #include "intel.h"
 
