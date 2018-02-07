@@ -45,6 +45,40 @@ struct sdw_msg {
 	bool page;
 };
 
+/**
+ * sdw_slave_runtime: Runtime Stream parameters for Slave
+ *
+ * @slave: Slave handle
+ * @direction: Data direction w.r.t Slave
+ * @ch_count: Channel count of the Slave w.r.t stream
+ * @m_rt_node: sdw_master_runtime list node
+ */
+struct sdw_slave_runtime {
+	struct sdw_slave *slave;
+	enum sdw_data_direction direction;
+	unsigned int ch_count;
+	struct list_head m_rt_node;
+};
+
+/**
+ * sdw_master_runtime: Runtime stream parameters for Master
+ *
+ * @bus: Bus handle
+ * @stream: Stream runtime handle
+ * @ch_count: Master channel count
+ * @slave_list: Slave runtime list
+ * @stream_node: sdw_stream_runtime master_list node
+ * @bus_node: sdw_bus m_rt_list node
+ */
+struct sdw_master_runtime {
+	struct sdw_bus *bus;
+	struct sdw_stream_runtime *stream;
+	unsigned int ch_count;
+	struct list_head slave_list;
+	struct list_head stream_node;
+	struct list_head bus_node;
+};
+
 int sdw_transfer(struct sdw_bus *bus, struct sdw_msg *msg);
 int sdw_transfer_defer(struct sdw_bus *bus, struct sdw_msg *msg,
 				struct sdw_defer *defer);
