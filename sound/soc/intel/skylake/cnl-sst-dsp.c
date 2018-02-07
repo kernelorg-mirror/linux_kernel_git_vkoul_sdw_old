@@ -272,3 +272,9 @@ void cnl_ipc_free(struct sst_generic_ipc *ipc)
 	cnl_ipc_op_int_disable(ipc->dsp);
 	sst_ipc_fini(ipc);
 }
+
+void cnl_sdw_int_enable(struct sst_dsp *ctx, bool enable)
+{
+	sst_dsp_shim_update_bits(ctx, CNL_ADSP_REG_ADSPIC2,
+		CNL_ADSPIC2_SNDW, CNL_ADSPIC2_SNDW);
+}
