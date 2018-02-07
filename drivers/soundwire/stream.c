@@ -381,7 +381,6 @@ int sdw_stream_add_master(struct sdw_bus *bus,
 //		trace_sdw_config_ports(bus, slave,
 //				&ports_config->port_config[i], stream->name);
 
-	mutex_lock(&bus->bus_lock);
 
 	stream->state = SDW_STREAM_CONFIG;
 	goto error;
