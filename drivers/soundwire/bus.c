@@ -78,6 +78,9 @@ int sdw_add_bus_master(struct sdw_bus *bus)
 		return ret;
 	}
 
+	bus->params.curr_bank = SDW_BANK0;
+	bus->params.next_bank = SDW_BANK1;
+
 	return 0;
 }
 EXPORT_SYMBOL(sdw_add_bus_master);
