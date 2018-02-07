@@ -262,4 +262,17 @@ config SND_SOC_INTEL_KBL_RT5663_RT5514_MAX98927_MACH
           Say Y if you have such a device.
           If unsure select "N".
 
+config SND_SOC_INTEL_CNL_RT700_MACH
+        tristate "SOC Machine Audio driver for CNL Platform"
+        depends on X86 && ACPI
+        depends on SND_SOC_INTEL_SKYLAKE
+	select SND_SOC_RT700
+	select SND_SOC_RT700_SDW
+	select SND_SOC_DMIC
+        help
+        This adds support for ASoC machine driver . This will create an alsa
+        sound card.
+        Say Y if you have such a device
+        If unsure select "N".
+
 endif
