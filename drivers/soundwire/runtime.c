@@ -389,7 +389,7 @@ static int sdw_prep_deprep_slave_ports(struct sdw_bus *bus,
 		intr = true;
 
 	/* Enable interrupt before Port prepare */
-	if ((prep) && (intr)) {
+	if (prep && intr) {
 		ret = sdw_configure_dpn_intr(s_rt->slave, p_rt->num, prep,
 						dpn_prop->device_interrupts);
 		if (ret < 0)
@@ -447,7 +447,7 @@ static int sdw_prep_deprep_slave_ports(struct sdw_bus *bus,
 	}
 
 	/* Disable interrupt after Port de-prepare */
-	if ((!prep) && (intr))
+	if (!prep && intr)
 		ret = sdw_configure_dpn_intr(s_rt->slave, p_rt->num, prep,
 						dpn_prop->device_interrupts);
 

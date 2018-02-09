@@ -182,9 +182,8 @@ static void sdw_release_master_stream(struct sdw_stream_runtime *stream)
 	struct sdw_slave_runtime *s_rt, *_s_rt;
 
 	list_for_each_entry_safe(s_rt, _s_rt,
-			&m_rt->slave_list, m_rt_node) {
+			&m_rt->slave_list, m_rt_node)
 		sdw_release_slave_stream(s_rt->slave, stream);
-	}
 
 	list_del(&m_rt->bus_node);
 	stream->m_rt = NULL;
