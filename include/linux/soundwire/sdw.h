@@ -554,18 +554,18 @@ struct sdw_stream_params {
 /**
  * sdw_stream_runtime: Runtime stream parameters
  *
+ * @name: SoundWire stream name
  * @params: Stream parameters
  * @state: Current state of the stream
  * @type: Stream type PCM or PDM
- * @master_list: List of Master runtime(s) in this stream
- * @name: SoundWire stream name
+ * @m_rt: Master runtime
  */
 struct sdw_stream_runtime {
+	char *name;
 	struct sdw_stream_params params;
 	enum sdw_stream_state state;
 	enum sdw_stream_type type;
-	struct list_head master_list;
-	char *name;
+	struct sdw_master_runtime *m_rt;
 };
 
 struct sdw_stream_runtime *sdw_alloc_stream(char *stream_name);

@@ -44,27 +44,11 @@ struct sdw_stream_runtime *sdw_alloc_stream(char *stream_name)
 		return NULL;
 
 	stream->name = stream_name;
-	INIT_LIST_HEAD(&stream->master_list);
 	stream->state = SDW_STREAM_ALLOC;
 
 	return stream;
 }
 EXPORT_SYMBOL(sdw_alloc_stream);
-
-static struct sdw_master_runtime
-*sdw_find_master_rt(struct sdw_bus *bus,
-			struct sdw_stream_runtime *stream)
-{
-	struct sdw_master_runtime *m_rt = NULL;
-
-	/* Retrieve Bus handle if already available */
-	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
-		if (m_rt->bus == bus)
-			return m_rt;
-	}
-
-	return NULL;
-}
 
 /**
  * sdw_alloc_master_rt: Allocates and initialize Master runtime handle
@@ -80,7 +64,7 @@ static struct sdw_master_runtime
 {
 	struct sdw_master_runtime *m_rt = NULL;
 
-	m_rt = sdw_find_master_rt(bus, stream);
+	m_rt = stream->m_rt;
 	if (m_rt)
 		goto stream_config;
 
@@ -90,7 +74,7 @@ static struct sdw_master_runtime
 
 	/* Initialization of Master runtime handle */
 	INIT_LIST_HEAD(&m_rt->slave_list);
-	list_add_tail(&m_rt->stream_node, &stream->master_list);
+	stream->m_rt = m_rt;
 
 	list_add_tail(&m_rt->bus_node, &bus->m_rt_list);
 
@@ -138,31 +122,23 @@ static void sdw_release_slave_stream(struct sdw_slave *slave,
 			struct sdw_stream_runtime *stream)
 {
 	struct sdw_slave_runtime *s_rt, *_s_rt;
-	struct sdw_master_runtime *m_rt;
+	struct sdw_master_runtime *m_rt = stream->m_rt;
 
-	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
-		/* Retrieve Slave runtime handle */
-		list_for_each_entry_safe(s_rt, _s_rt,
-					&m_rt->slave_list, m_rt_node) {
+	/* Retrieve Slave runtime handle */
+	list_for_each_entry_safe(s_rt, _s_rt,
+			&m_rt->slave_list, m_rt_node) {
 
-			if (s_rt->slave == slave) {
-				list_del(&s_rt->m_rt_node);
-				kfree(s_rt);
-				return;
-			}
+		if (s_rt->slave == slave) {
+			list_del(&s_rt->m_rt_node);
+			kfree(s_rt);
+			return;
 		}
 	}
 }
 
-/**
- * sdw_release_master_stream: Free Master runtime handle
- *
- * @m_rt: master runtime
- * @stream: Stream runtime handle.
- */
-static void sdw_release_master_stream(struct sdw_master_runtime *m_rt,
-			struct sdw_stream_runtime *stream)
+static void sdw_release_master_stream(struct sdw_stream_runtime *stream)
 {
+	struct sdw_master_runtime *m_rt = stream->m_rt;
 	struct sdw_slave_runtime *s_rt, *_s_rt;
 
 	list_for_each_entry_safe(s_rt, _s_rt,
@@ -170,8 +146,8 @@ static void sdw_release_master_stream(struct sdw_master_runtime *m_rt,
 		sdw_release_slave_stream(s_rt->slave, stream);
 	}
 
-	list_del(&m_rt->stream_node);
 	list_del(&m_rt->bus_node);
+	stream->m_rt = NULL;
 	kfree(m_rt);
 }
 
@@ -187,21 +163,10 @@ static void sdw_release_master_stream(struct sdw_master_runtime *m_rt,
 int sdw_stream_remove_master(struct sdw_bus *bus,
 		struct sdw_stream_runtime *stream)
 {
-	struct sdw_master_runtime *m_rt, *_m_rt;
-
 	mutex_lock(&bus->bus_lock);
 
-	list_for_each_entry_safe(m_rt, _m_rt,
-			&stream->master_list, stream_node) {
-
-		if (m_rt->bus != bus)
-			continue;
-
-		sdw_release_master_stream(m_rt, stream);
-	}
-
-	if (list_empty(&stream->master_list))
-		stream->state = SDW_STREAM_RELEASE;
+	sdw_release_master_stream(stream);
+	stream->state = SDW_STREAM_RELEASE;
 
 	mutex_unlock(&bus->bus_lock);
 
