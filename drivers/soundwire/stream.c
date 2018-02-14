@@ -132,21 +132,19 @@ static void sdw_slave_port_deconfig(struct sdw_bus *bus,
 		struct sdw_stream_runtime *stream)
 {
 	struct sdw_port_runtime *p_rt, *_p_rt;
-	struct sdw_master_runtime *m_rt;
+	struct sdw_master_runtime *m_rt = stream->m_rt;
 	struct sdw_slave_runtime *s_rt;
 
-	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
-		list_for_each_entry(s_rt, &m_rt->slave_list, m_rt_node) {
+	list_for_each_entry(s_rt, &m_rt->slave_list, m_rt_node) {
 
-			if (s_rt->slave != slave)
-				continue;
+		if (s_rt->slave != slave)
+			continue;
 
-			list_for_each_entry_safe(p_rt, _p_rt,
-					&s_rt->port_list, port_node) {
+		list_for_each_entry_safe(p_rt, _p_rt,
+				&s_rt->port_list, port_node) {
 
-				list_del(&p_rt->port_node);
-				kfree(p_rt);
-			}
+			list_del(&p_rt->port_node);
+			kfree(p_rt);
 		}
 	}
 }
@@ -203,7 +201,7 @@ int sdw_stream_remove_master(struct sdw_bus *bus,
 	mutex_lock(&bus->bus_lock);
 
 	sdw_release_master_stream(stream);
-	sdw_master_port_deconfig(bus, m_rt);
+	sdw_master_port_deconfig(bus, stream->m_rt);
 	stream->state = SDW_STREAM_RELEASE;
 	kfree(stream->m_rt);
 	stream->m_rt = NULL;
@@ -378,7 +376,7 @@ int sdw_stream_add_master(struct sdw_bus *bus,
 	goto error;
 
 port_error:
-	sdw_release_master_stream(m_rt, stream);
+	sdw_release_master_stream(stream);
 
 error:
 	mutex_unlock(&bus->bus_lock);
@@ -442,7 +440,7 @@ int sdw_stream_add_slave(struct sdw_slave *slave,
 	goto error;
 
 port_error:
-	sdw_release_master_stream(m_rt, stream);
+	sdw_release_master_stream(stream);
 error:
 	mutex_unlock(&slave->bus->bus_lock);
 	return ret;
