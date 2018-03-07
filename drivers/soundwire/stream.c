@@ -479,3 +479,154 @@ struct sdw_dpn_prop *sdw_get_slave_dpn_prop(struct sdw_slave *slave,
 
 	return NULL;
 }
+
+/**
+ * sdw_prepare_stream: Prepare SoundWire stream
+ *
+ * @stream: Soundwire stream
+ *
+ * Documentation/soundwire/stream.txt explains this API in detail
+ */
+int sdw_prepare_stream(struct sdw_stream_runtime *stream)
+{
+	int ret = 0;
+
+	if (!stream) {
+		pr_err("SoundWire: Handle not found for stream");
+		return -EINVAL;
+	}
+
+	sdw_acquire_bus_lock(stream);
+
+	if (stream->state == SDW_STREAM_DISABLE)
+		goto error;
+
+	if ((stream->state != SDW_STREAM_CONFIG) &&
+		(stream->state != SDW_STREAM_DEPREPARE)) {
+		ret = -EINVAL;
+		goto error;
+	}
+
+	ret = _sdw_prepare_stream(stream);
+	if (ret < 0) {
+		pr_err("Prepare for stream:%s failed: %d", stream->name, ret);
+		goto error;
+	}
+
+error:
+	sdw_release_bus_lock(stream);
+	return ret;
+}
+EXPORT_SYMBOL(sdw_prepare_stream);
+
+/**
+ * sdw_enable_stream: Enable SoundWire stream
+ *
+ * @stream: Soundwire stream
+ *
+ * Documentation/soundwire/stream.txt explains this API in detail
+ */
+int sdw_enable_stream(struct sdw_stream_runtime *stream)
+{
+	int ret = 0;
+
+	if (!stream) {
+		pr_err("SoundWire: Handle not found for stream");
+		return -EINVAL;
+	}
+
+	sdw_acquire_bus_lock(stream);
+
+	if (stream->state == SDW_STREAM_ENABLE)
+		goto error;
+
+	if ((stream->state != SDW_STREAM_PREPARE) &&
+		(stream->state != SDW_STREAM_DISABLE)) {
+		ret = -EINVAL;
+		goto error;
+	}
+
+	ret = _sdw_enable_stream(stream);
+	if (ret < 0) {
+		pr_err("Enable for stream:%s failed: %d", stream->name, ret);
+		goto error;
+	}
+
+error:
+	sdw_release_bus_lock(stream);
+	return ret;
+}
+EXPORT_SYMBOL(sdw_enable_stream);
+
+/**
+ * sdw_disable_stream: Disable SoundWire stream
+ *
+ * @stream: Soundwire stream
+ *
+ * Documentation/soundwire/stream.txt explains this API in detail
+ */
+int sdw_disable_stream(struct sdw_stream_runtime *stream)
+{
+	int ret = 0;
+
+	if (!stream) {
+		pr_err("SoundWire: Handle not found for stream");
+		return -EINVAL;
+	}
+
+	sdw_acquire_bus_lock(stream);
+
+	if (stream->state == SDW_STREAM_DISABLE)
+		goto error;
+
+	if (stream->state != SDW_STREAM_ENABLE) {
+		ret = -EINVAL;
+		goto error;
+	}
+
+	ret = _sdw_disable_stream(stream);
+	if (ret < 0) {
+		pr_err("Disable for stream:%s failed: %d", stream->name, ret);
+		goto error;
+	}
+
+error:
+	sdw_release_bus_lock(stream);
+	return ret;
+}
+EXPORT_SYMBOL(sdw_disable_stream);
+
+/**
+ * sdw_deprepare_stream: Deprepare SoundWire stream
+ *
+ * @stream: Soundwire stream
+ *
+ * Documentation/soundwire/stream.txt explains this API in detail
+ */
+int sdw_deprepare_stream(struct sdw_stream_runtime *stream)
+{
+	int ret = 0;
+
+	if (!stream) {
+		pr_err("SoundWire: Handle not found for stream");
+		return -EINVAL;
+	}
+
+	sdw_acquire_bus_lock(stream);
+
+	if (stream->state != SDW_STREAM_DISABLE) {
+		ret = -EINVAL;
+		goto error;
+	}
+
+	ret = _sdw_deprepare_stream(stream);
+	if (ret < 0) {
+		pr_err("De-prepare for stream:%d failed: %d", ret, ret);
+		goto error;
+	}
+
+error:
+	sdw_release_bus_lock(stream);
+	return ret;
+}
+EXPORT_SYMBOL(sdw_deprepare_stream);
