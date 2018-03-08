@@ -760,6 +760,8 @@ int _sdw_deprepare_stream(struct sdw_stream_runtime *stream)
 
 	return do_bank_switch(stream);
 
+	trace_sdw_bus_params(bus);
+
 exit:
 	stream->state = SDW_STREAM_DEPREPARE;
 
@@ -793,6 +795,8 @@ int _sdw_disable_stream(struct sdw_stream_runtime *stream)
 		return ret;
 	}
 
+	trace_sdw_bus_params(bus);
+
 	return do_bank_switch(stream);
 }
 
@@ -820,6 +824,8 @@ int _sdw_enable_stream(struct sdw_stream_runtime *stream)
 		dev_err(bus->dev, "Enable port(s) failed ret: %d", ret);
 		return ret;
 	}
+
+	trace_sdw_bus_params(bus);
 
 	ret = do_bank_switch(stream);
 	if (ret < 0) {
@@ -885,6 +891,7 @@ int _sdw_prepare_stream(struct sdw_stream_runtime *stream)
 		dev_err(bus->dev, "Prepare port(s) failed ret = %d",
 				ret);
 		return ret;
+	trace_sdw_bus_params(bus);
 	}
 
 	stream->state = SDW_STREAM_PREPARE;

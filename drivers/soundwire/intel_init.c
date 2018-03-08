@@ -89,6 +89,10 @@ static struct sdw_intel_ctx
 		return NULL;
 	}
 
+	// BIOS FIX need count = 1
+	/* STODO: Remove before posting patches */
+	count = 2;
+
 	dev_dbg(&adev->dev, "Creating %d SDW Link devices\n", count);
 
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
