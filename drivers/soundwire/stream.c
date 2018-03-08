@@ -14,6 +14,9 @@
 #include <linux/soundwire/sdw.h>
 #include "bus.h"
 
+#define CREATE_TRACE_POINTS
+#include <trace/events/sdw.h>
+
 /**
  * sdw_release_stream: Free the assigned stream runtime
  *
@@ -230,6 +233,8 @@ int sdw_stream_remove_slave(struct sdw_slave *slave,
 	sdw_release_slave_stream(slave, stream);
 
 	mutex_unlock(&slave->bus->bus_lock);
+//	trace_sdw_config_stream(&slave->bus, slave,
+//				stream_config, stream->name);
 
 	return 0;
 }
@@ -371,6 +376,12 @@ int sdw_stream_add_master(struct sdw_bus *bus,
 	ret = sdw_master_port_config(bus, m_rt, ports_config);
 	if (ret)
 		goto port_error;
+
+//	for (i = 0; i < ports_config->count; i++)
+//		trace_sdw_config_ports(bus, slave,
+//				&ports_config->port_config[i], stream->name);
+
+	mutex_lock(&bus->bus_lock);
 
 	stream->state = SDW_STREAM_CONFIG;
 	goto error;
