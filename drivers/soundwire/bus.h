@@ -108,6 +108,7 @@ struct sdw_slave_runtime {
  * used for computing and programming transport parameters, port
  * parameters of Master port
  * @slave_list: Slave runtime list
+ * @stream_node: sdw_stream_runtime master_list node
  * @bus_node: sdw_bus m_rt_list node
  */
 struct sdw_master_runtime {
@@ -116,6 +117,7 @@ struct sdw_master_runtime {
 	unsigned int ch_count;
 	struct list_head port_list;
 	struct list_head slave_list;
+	struct list_head stream_node;
 	struct list_head bus_node;
 };
 

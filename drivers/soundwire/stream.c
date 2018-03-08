@@ -47,11 +47,52 @@ struct sdw_stream_runtime *sdw_alloc_stream(char *stream_name)
 		return NULL;
 
 	stream->name = stream_name;
+	INIT_LIST_HEAD(&stream->master_list);
 	stream->state = SDW_STREAM_ALLOC;
 
 	return stream;
 }
 EXPORT_SYMBOL(sdw_alloc_stream);
+
+static void sdw_acquire_bus_lock(struct sdw_stream_runtime *stream)
+{
+	struct sdw_master_runtime *m_rt = NULL;
+	struct sdw_bus *bus = NULL;
+
+	/* Iterate for all Master(s) in Master list */
+	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
+		bus = m_rt->bus;
+
+		mutex_lock(&bus->bus_lock);
+	}
+}
+
+static void sdw_release_bus_lock(struct sdw_stream_runtime *stream)
+{
+	struct sdw_master_runtime *m_rt = NULL;
+	struct sdw_bus *bus = NULL;
+
+	/* Iterate for all Master(s) in Master list */
+	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
+		bus = m_rt->bus;
+		mutex_unlock(&bus->bus_lock);
+	}
+}
+
+static struct sdw_master_runtime
+*sdw_find_master_rt(struct sdw_bus *bus,
+			struct sdw_stream_runtime *stream)
+{
+	struct sdw_master_runtime *m_rt = NULL;
+
+	/* Retrieve Bus handle if already available */
+	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
+		if (m_rt->bus == bus)
+			return m_rt;
+	}
+
+	return NULL;
+}
 
 /**
  * sdw_alloc_master_rt: Allocates and initialize Master runtime handle
@@ -67,7 +108,7 @@ static struct sdw_master_runtime
 {
 	struct sdw_master_runtime *m_rt = NULL;
 
-	m_rt = stream->m_rt;
+	m_rt = sdw_find_master_rt(bus, stream);
 	if (m_rt)
 		goto stream_config;
 
@@ -78,7 +119,7 @@ static struct sdw_master_runtime
 	/* Initialization of Master runtime handle */
 	INIT_LIST_HEAD(&m_rt->port_list);
 	INIT_LIST_HEAD(&m_rt->slave_list);
-	stream->m_rt = m_rt;
+	list_add_tail(&m_rt->stream_node, &stream->master_list);
 
 	list_add_tail(&m_rt->bus_node, &bus->m_rt_list);
 
@@ -135,19 +176,21 @@ static void sdw_slave_port_deconfig(struct sdw_bus *bus,
 		struct sdw_stream_runtime *stream)
 {
 	struct sdw_port_runtime *p_rt, *_p_rt;
-	struct sdw_master_runtime *m_rt = stream->m_rt;
+	struct sdw_master_runtime *m_rt;
 	struct sdw_slave_runtime *s_rt;
 
-	list_for_each_entry(s_rt, &m_rt->slave_list, m_rt_node) {
+	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
+		list_for_each_entry(s_rt, &m_rt->slave_list, m_rt_node) {
 
-		if (s_rt->slave != slave)
-			continue;
+			if (s_rt->slave != slave)
+				continue;
 
-		list_for_each_entry_safe(p_rt, _p_rt,
-				&s_rt->port_list, port_node) {
+			list_for_each_entry_safe(p_rt, _p_rt,
+					&s_rt->port_list, port_node) {
 
-			list_del(&p_rt->port_node);
-			kfree(p_rt);
+				list_del(&p_rt->port_node);
+				kfree(p_rt);
+			}
 		}
 	}
 }
@@ -162,30 +205,40 @@ static void sdw_release_slave_stream(struct sdw_slave *slave,
 			struct sdw_stream_runtime *stream)
 {
 	struct sdw_slave_runtime *s_rt, *_s_rt;
-	struct sdw_master_runtime *m_rt = stream->m_rt;
+	struct sdw_master_runtime *m_rt;
 
-	/* Retrieve Slave runtime handle */
-	list_for_each_entry_safe(s_rt, _s_rt,
-			&m_rt->slave_list, m_rt_node) {
+	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
+		/* Retrieve Slave runtime handle */
+		list_for_each_entry_safe(s_rt, _s_rt,
+					&m_rt->slave_list, m_rt_node) {
 
-		if (s_rt->slave == slave) {
-			list_del(&s_rt->m_rt_node);
-			kfree(s_rt);
-			return;
+			if (s_rt->slave == slave) {
+				list_del(&s_rt->m_rt_node);
+				kfree(s_rt);
+				return;
+			}
 		}
 	}
 }
 
-static void sdw_release_master_stream(struct sdw_stream_runtime *stream)
+/**
+ * sdw_release_master_stream: Free Master runtime handle
+ *
+ * @m_rt: master runtime
+ * @stream: Stream runtime handle.
+ */
+static void sdw_release_master_stream(struct sdw_master_runtime *m_rt,
+			struct sdw_stream_runtime *stream)
 {
-	struct sdw_master_runtime *m_rt = stream->m_rt;
 	struct sdw_slave_runtime *s_rt, *_s_rt;
 
 	list_for_each_entry_safe(s_rt, _s_rt,
 			&m_rt->slave_list, m_rt_node)
 		sdw_release_slave_stream(s_rt->slave, stream);
 
+	list_del(&m_rt->stream_node);
 	list_del(&m_rt->bus_node);
+	kfree(m_rt);
 }
 
 /**
@@ -200,13 +253,22 @@ static void sdw_release_master_stream(struct sdw_stream_runtime *stream)
 int sdw_stream_remove_master(struct sdw_bus *bus,
 		struct sdw_stream_runtime *stream)
 {
+	struct sdw_master_runtime *m_rt, *_m_rt;
+
 	mutex_lock(&bus->bus_lock);
 
-	sdw_release_master_stream(stream);
-	sdw_master_port_deconfig(bus, stream->m_rt);
-	stream->state = SDW_STREAM_RELEASE;
-	kfree(stream->m_rt);
-	stream->m_rt = NULL;
+	list_for_each_entry_safe(m_rt, _m_rt,
+			&stream->master_list, stream_node) {
+
+		if (m_rt->bus != bus)
+			continue;
+
+		sdw_master_port_deconfig(bus, m_rt);
+		sdw_release_master_stream(m_rt, stream);
+	}
+
+	if (list_empty(&stream->master_list))
+		stream->state = SDW_STREAM_RELEASE;
 
 	mutex_unlock(&bus->bus_lock);
 
@@ -385,7 +447,7 @@ int sdw_stream_add_master(struct sdw_bus *bus,
 	goto error;
 
 port_error:
-	sdw_release_master_stream(stream);
+	sdw_release_master_stream(m_rt, stream);
 
 error:
 	mutex_unlock(&bus->bus_lock);
@@ -449,7 +511,7 @@ int sdw_stream_add_slave(struct sdw_slave *slave,
 	goto error;
 
 port_error:
-	sdw_release_master_stream(stream);
+	sdw_release_master_stream(m_rt, stream);
 error:
 	mutex_unlock(&slave->bus->bus_lock);
 	return ret;
@@ -505,7 +567,7 @@ int sdw_prepare_stream(struct sdw_stream_runtime *stream)
 		return -EINVAL;
 	}
 
-	mutex_lock(&stream->m_rt->bus->bus_lock);
+	sdw_acquire_bus_lock(stream);
 
 	if (stream->state == SDW_STREAM_DISABLE)
 		goto error;
@@ -523,7 +585,7 @@ int sdw_prepare_stream(struct sdw_stream_runtime *stream)
 	}
 
 error:
-	mutex_unlock(&stream->m_rt->bus->bus_lock);
+	sdw_release_bus_lock(stream);
 	return ret;
 }
 EXPORT_SYMBOL(sdw_prepare_stream);
@@ -544,7 +606,7 @@ int sdw_enable_stream(struct sdw_stream_runtime *stream)
 		return -EINVAL;
 	}
 
-	mutex_lock(&stream->m_rt->bus->bus_lock);
+	sdw_acquire_bus_lock(stream);
 
 	if (stream->state == SDW_STREAM_ENABLE)
 		goto error;
@@ -562,7 +624,7 @@ int sdw_enable_stream(struct sdw_stream_runtime *stream)
 	}
 
 error:
-	mutex_unlock(&stream->m_rt->bus->bus_lock);
+	sdw_release_bus_lock(stream);
 	return ret;
 }
 EXPORT_SYMBOL(sdw_enable_stream);
@@ -583,7 +645,7 @@ int sdw_disable_stream(struct sdw_stream_runtime *stream)
 		return -EINVAL;
 	}
 
-	mutex_lock(&stream->m_rt->bus->bus_lock);
+	sdw_acquire_bus_lock(stream);
 
 	if (stream->state == SDW_STREAM_DISABLE)
 		goto error;
@@ -600,7 +662,7 @@ int sdw_disable_stream(struct sdw_stream_runtime *stream)
 	}
 
 error:
-	mutex_unlock(&stream->m_rt->bus->bus_lock);
+	sdw_release_bus_lock(stream);
 	return ret;
 }
 EXPORT_SYMBOL(sdw_disable_stream);
@@ -621,7 +683,7 @@ int sdw_deprepare_stream(struct sdw_stream_runtime *stream)
 		return -EINVAL;
 	}
 
-	mutex_lock(&stream->m_rt->bus->bus_lock);
+	sdw_acquire_bus_lock(stream);
 
 	if (stream->state != SDW_STREAM_DISABLE) {
 		ret = -EINVAL;
@@ -635,7 +697,7 @@ int sdw_deprepare_stream(struct sdw_stream_runtime *stream)
 	}
 
 error:
-	mutex_unlock(&stream->m_rt->bus->bus_lock);
+	sdw_release_bus_lock(stream);
 	return ret;
 }
 EXPORT_SYMBOL(sdw_deprepare_stream);
