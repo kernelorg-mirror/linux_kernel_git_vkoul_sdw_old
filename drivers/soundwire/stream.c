@@ -186,8 +186,6 @@ static void sdw_release_master_stream(struct sdw_stream_runtime *stream)
 		sdw_release_slave_stream(s_rt->slave, stream);
 
 	list_del(&m_rt->bus_node);
-	stream->m_rt = NULL;
-	kfree(m_rt);
 }
 
 /**
@@ -207,6 +205,8 @@ int sdw_stream_remove_master(struct sdw_bus *bus,
 	sdw_release_master_stream(stream);
 	sdw_master_port_deconfig(bus, stream->m_rt);
 	stream->state = SDW_STREAM_RELEASE;
+	kfree(stream->m_rt);
+	stream->m_rt = NULL;
 
 	mutex_unlock(&bus->bus_lock);
 
