@@ -720,38 +720,32 @@ err:
  */
 int _sdw_deprepare_stream(struct sdw_stream_runtime *stream)
 {
-	struct sdw_master_runtime *m_rt = NULL;
-	struct sdw_bus *bus = NULL;
+	struct sdw_master_runtime *m_rt = stream->m_rt;
+	struct sdw_bus *bus = m_rt->bus;
 	int ret = 0;
 
-	/* De-prepare Master(s) and Slave(s) port(s) associated with stream */
-	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
-		bus = m_rt->bus;
+	/* De-prepare port(s) */
+	ret = sdw_prep_deprep_ports(m_rt, false);
+	if (ret < 0) {
+		dev_err(bus->dev, "De-prepare port(s) failed: %d", ret);
+		return ret;
+	}
 
-		/* De-prepare port(s) */
-		ret = sdw_prep_deprep_ports(m_rt, false);
-		if (ret < 0) {
-			dev_err(bus->dev, "De-prepare port(s) failed: %d", ret);
-			return ret;
-		}
+	bus->params.bandwidth -= m_rt->stream->params.rate *
+		m_rt->ch_count * m_rt->stream->params.bps;
 
-		bus->params.bandwidth -= m_rt->stream->params.rate *
-			m_rt->ch_count * m_rt->stream->params.bps;
+	if (!bus->params.bandwidth) {
+		bus->params.row = 0;
+		bus->params.col = 0;
+		goto exit;
 
-		if (!bus->params.bandwidth) {
-			bus->params.row = 0;
-			bus->params.col = 0;
-			goto exit;
+	}
 
-		}
-
-		/* Program params */
-		ret = sdw_program_params(bus);
-		if (ret < 0) {
-			dev_err(bus->dev, "Program params failed: %d", ret);
-			return ret;
-		}
-
+	/* Program params */
+	ret = sdw_program_params(bus);
+	if (ret < 0) {
+		dev_err(bus->dev, "Program params failed: %d", ret);
+		return ret;
 	}
 
 	return do_bank_switch(stream);
@@ -769,31 +763,24 @@ exit:
  */
 int _sdw_disable_stream(struct sdw_stream_runtime *stream)
 {
-	struct sdw_master_runtime *m_rt = NULL;
-	struct sdw_bus *bus = NULL;
+	struct sdw_master_runtime *m_rt = stream->m_rt;
+	struct sdw_bus *bus = m_rt->bus;
 	int ret;
 
-	/* Disable Master(s) and Slave(s) port(s) associated with stream */
-	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
-		bus = m_rt->bus;
-		/* Disable port(s) */
-		ret = sdw_enable_disable_ports(m_rt, false);
-		if (ret < 0) {
-			dev_err(bus->dev, "Disable port(s) failed: %d", ret);
-			return ret;
-		}
+	/* Disable port(s) */
+	ret = sdw_enable_disable_ports(m_rt, false);
+	if (ret < 0) {
+		dev_err(bus->dev, "Disable port(s) failed: %d", ret);
+		return ret;
 	}
 
 	stream->state = SDW_STREAM_DISABLE;
 
-	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
-		bus = m_rt->bus;
-		/* Program params */
-		ret = sdw_program_params(bus);
-		if (ret < 0) {
-			dev_err(bus->dev, "Program params failed: %d", ret);
-			return ret;
-		}
+	/* Program params */
+	ret = sdw_program_params(bus);
+	if (ret < 0) {
+		dev_err(bus->dev, "Program params failed: %d", ret);
+		return ret;
 	}
 
 	return do_bank_switch(stream);
@@ -806,27 +793,22 @@ int _sdw_disable_stream(struct sdw_stream_runtime *stream)
  */
 int _sdw_enable_stream(struct sdw_stream_runtime *stream)
 {
-	struct sdw_master_runtime *m_rt = NULL;
-	struct sdw_bus *bus = NULL;
+	struct sdw_master_runtime *m_rt = stream->m_rt;
+	struct sdw_bus *bus = m_rt->bus;
 	int ret;
 
-	/* Enable Master(s) and Slave(s) port(s) associated with stream */
-	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
-		bus = m_rt->bus;
+	/* Program params */
+	ret = sdw_program_params(bus);
+	if (ret < 0) {
+		dev_err(bus->dev, "Program params failed: %d", ret);
+		return ret;
+	}
 
-		/* Program params */
-		ret = sdw_program_params(bus);
-		if (ret < 0) {
-			dev_err(bus->dev, "Program params failed: %d", ret);
-			return ret;
-		}
-
-		/* Enable port(s) */
-		ret = sdw_enable_disable_ports(m_rt, true);
-		if (ret < 0) {
-			dev_err(bus->dev, "Enable port(s) failed ret: %d", ret);
-			return ret;
-		}
+	/* Enable port(s) */
+	ret = sdw_enable_disable_ports(m_rt, true);
+	if (ret < 0) {
+		dev_err(bus->dev, "Enable port(s) failed ret: %d", ret);
+		return ret;
 	}
 
 	ret = do_bank_switch(stream);
@@ -846,35 +828,30 @@ int _sdw_enable_stream(struct sdw_stream_runtime *stream)
  */
 int _sdw_prepare_stream(struct sdw_stream_runtime *stream)
 {
-	struct sdw_master_runtime *m_rt = NULL;
+	struct sdw_master_runtime *m_rt = stream->m_rt;
+	struct sdw_bus *bus = m_rt->bus;
 	struct sdw_master_prop *prop = NULL;
 	struct sdw_bus_params params;
-	struct sdw_bus *bus = NULL;
 	int ret;
 
-	/* Prepare  Master(s) and Slave(s) port(s) associated with stream */
-	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
-		bus = m_rt->bus;
-		prop = &bus->prop;
-		memcpy(&params, &bus->params, sizeof(params));
+	prop = &bus->prop;
+	memcpy(&params, &bus->params, sizeof(params));
 
-		/* TODO: Support Asynchronous mode */
-		if ((prop->max_freq % stream->params.rate) != 0) {
-			dev_err(bus->dev, "Async mode not supported");
-			return -EINVAL;
-		}
+	/* TODO: Support Asynchronous mode */
+	if ((prop->max_freq % stream->params.rate) != 0) {
+		dev_err(bus->dev, "Async mode not supported");
+		return -EINVAL;
+	}
 
-		/* Increment cumulative bus bandwidth */
-		bus->params.bandwidth += m_rt->stream->params.rate *
-			m_rt->ch_count * m_rt->stream->params.bps;
+	/* Increment cumulative bus bandwidth */
+	bus->params.bandwidth += m_rt->stream->params.rate *
+		m_rt->ch_count * m_rt->stream->params.bps;
 
-		/* Program params */
-		ret = sdw_program_params(bus);
-		if (ret < 0) {
-			dev_err(bus->dev, "Program params failed: %d", ret);
-			goto restore_params;
-		}
-
+	/* Program params */
+	ret = sdw_program_params(bus);
+	if (ret < 0) {
+		dev_err(bus->dev, "Program params failed: %d", ret);
+		goto restore_params;
 	}
 
 	ret = do_bank_switch(stream);
@@ -883,17 +860,12 @@ int _sdw_prepare_stream(struct sdw_stream_runtime *stream)
 		goto restore_params;
 	}
 
-	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
-		bus = m_rt->bus;
-
-		/* Prepare port(s) on the new clock configuration */
-		ret = sdw_prep_deprep_ports(m_rt, true);
-		if (ret < 0) {
-			dev_err(bus->dev, "Prepare port(s) failed ret = %d",
-									ret);
-			return ret;
-		}
-
+	/* Prepare port(s) on the new clock configuration */
+	ret = sdw_prep_deprep_ports(m_rt, true);
+	if (ret < 0) {
+		dev_err(bus->dev, "Prepare port(s) failed ret = %d",
+				ret);
+		return ret;
 	}
 
 	stream->state = SDW_STREAM_PREPARE;
