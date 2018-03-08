@@ -496,7 +496,7 @@ int sdw_prepare_stream(struct sdw_stream_runtime *stream)
 		return -EINVAL;
 	}
 
-	sdw_acquire_bus_lock(stream);
+	mutex_lock(&stream->m_rt->bus->bus_lock);
 
 	if (stream->state == SDW_STREAM_DISABLE)
 		goto error;
@@ -514,7 +514,7 @@ int sdw_prepare_stream(struct sdw_stream_runtime *stream)
 	}
 
 error:
-	sdw_release_bus_lock(stream);
+	mutex_unlock(&stream->m_rt->bus->bus_lock);
 	return ret;
 }
 EXPORT_SYMBOL(sdw_prepare_stream);
@@ -535,7 +535,7 @@ int sdw_enable_stream(struct sdw_stream_runtime *stream)
 		return -EINVAL;
 	}
 
-	sdw_acquire_bus_lock(stream);
+	mutex_lock(&stream->m_rt->bus->bus_lock);
 
 	if (stream->state == SDW_STREAM_ENABLE)
 		goto error;
@@ -553,7 +553,7 @@ int sdw_enable_stream(struct sdw_stream_runtime *stream)
 	}
 
 error:
-	sdw_release_bus_lock(stream);
+	mutex_unlock(&stream->m_rt->bus->bus_lock);
 	return ret;
 }
 EXPORT_SYMBOL(sdw_enable_stream);
@@ -574,7 +574,7 @@ int sdw_disable_stream(struct sdw_stream_runtime *stream)
 		return -EINVAL;
 	}
 
-	sdw_acquire_bus_lock(stream);
+	mutex_lock(&stream->m_rt->bus->bus_lock);
 
 	if (stream->state == SDW_STREAM_DISABLE)
 		goto error;
@@ -591,7 +591,7 @@ int sdw_disable_stream(struct sdw_stream_runtime *stream)
 	}
 
 error:
-	sdw_release_bus_lock(stream);
+	mutex_unlock(&stream->m_rt->bus->bus_lock);
 	return ret;
 }
 EXPORT_SYMBOL(sdw_disable_stream);
@@ -612,7 +612,7 @@ int sdw_deprepare_stream(struct sdw_stream_runtime *stream)
 		return -EINVAL;
 	}
 
-	sdw_acquire_bus_lock(stream);
+	mutex_lock(&stream->m_rt->bus->bus_lock);
 
 	if (stream->state != SDW_STREAM_DISABLE) {
 		ret = -EINVAL;
@@ -626,7 +626,7 @@ int sdw_deprepare_stream(struct sdw_stream_runtime *stream)
 	}
 
 error:
-	sdw_release_bus_lock(stream);
+	mutex_unlock(&stream->m_rt->bus->bus_lock);
 	return ret;
 }
 EXPORT_SYMBOL(sdw_deprepare_stream);
