@@ -523,7 +523,8 @@ enum sdw_port_prep_ops {
  * struct sdw_bus_params: Structure holding bus configuration
  *
  * @curr_bank: Current bank in use (BANK0/BANK1)
- * @next_bank: Next bank to use (BANK0/BANK1)
+ * @next_bank: Next bank to use (BANK0/BANK1). next_bank will always be
+ * set to !curr_bank
  * @max_dr_freq: Maximum double rate clock frequency supported, in Hz
  * @curr_dr_freq: Current double rate clock frequency, in Hz
  * @bandwidth: Current bandwidth

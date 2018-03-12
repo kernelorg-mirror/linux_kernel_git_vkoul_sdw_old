@@ -87,6 +87,11 @@ static int _sdw_program_slave_port_params(struct sdw_bus *bus,
 		return ret;
 	}
 
+	/*
+	 * Data ports are FULL and REDUCED type. Above handles both and
+	 * beyond this point only FULL is handled, so bail out if we are
+	 * not FULL data port type
+	 */
 	if (type != SDW_DPN_FULL)
 		return ret;
 
@@ -146,8 +151,9 @@ static int sdw_program_slave_port_params(struct sdw_bus *bus,
 	}
 
 	/* Program DPN_PortCtrl register */
-	wbuf = (p_params->flow_mode | (p_params->data_mode <<
-			SDW_REG_SHIFT(SDW_DPN_PORTCTRL_DATAMODE)));
+	wbuf = p_params->data_mode << SDW_REG_SHIFT(SDW_DPN_PORTCTRL_DATAMODE);
+	wbuf |= p_params->flow_mode;
+
 	ret = sdw_update(s_rt->slave, addr1, 0xF, wbuf);
 	if (ret < 0) {
 		dev_err(&s_rt->slave->dev,
@@ -223,14 +229,18 @@ static int sdw_program_master_port_params(struct sdw_bus *bus,
 {
 	int ret;
 
-	/* Set transport parameters */
+	/*
+	 * we need to set transport and port parameters for the port.
+	 * Transport parameters refers to the smaple interval, offsets and
+	 * hstart/stop etc of the data. Port parameters refers to word
+	 * lenth, flow mode etc of the port
+	 */
 	ret = bus->port_ops->dpn_set_port_transport_params(bus,
 					&p_rt->transport_params,
 					bus->params.next_bank);
 	if (ret < 0)
 		return ret;
 
-	/* Set port parameters */
 	return bus->port_ops->dpn_set_port_params(bus,
 				&p_rt->port_params,
 				bus->params.next_bank);
