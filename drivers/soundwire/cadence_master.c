@@ -690,7 +690,7 @@ EXPORT_SYMBOL(sdw_cdns_enable_interrupt);
 
 static int cdns_allocate_pdi(struct sdw_cdns *cdns,
 			struct sdw_cdns_pdi **stream,
-			u32 start, u32 num, u32 pdi_offset, bool pcm)
+			u32 start, u32 num, u32 pdi_offset)
 {
 	struct sdw_cdns_pdi *pdi;
 	int i;
@@ -721,8 +721,7 @@ int sdw_cdns_pdi_init(struct sdw_cdns *cdns,
 			struct sdw_cdns_stream_config config)
 {
 	struct sdw_cdns_streams *stream;
-	int off = CDNS_PCM_PDI_OFFSET;
-	int i, ret;
+	int offset, i, ret;
 
 	cdns->pcm.num_bd = config.pcm_bd;
 	cdns->pcm.num_in = config.pcm_in;
@@ -736,21 +735,25 @@ int sdw_cdns_pdi_init(struct sdw_cdns *cdns,
 
 	/* First two PDIs are reserved for bulk transfers */
 	stream->num_bd -= CDNS_PCM_PDI_OFFSET;
+	offset = CDNS_PCM_PDI_OFFSET;
 
-	ret = cdns_allocate_pdi(cdns, &stream->bd, 0, stream->num_bd, off, 1);
+	ret = cdns_allocate_pdi(cdns, &stream->bd, 0,
+				stream->num_bd, offset);
 	if (ret)
 		goto pcm_error;
 
-	off += stream->num_bd;
+	offset += stream->num_bd;
 
-	ret = cdns_allocate_pdi(cdns, &stream->in, 0, stream->num_in, off, 1);
+	ret = cdns_allocate_pdi(cdns, &stream->in, 0,
+				stream->num_in, offset);
 	if (ret)
 		goto pcm_error;
 
 
-	off += stream->num_in;
+	offset += stream->num_in;
 
-	ret = cdns_allocate_pdi(cdns, &stream->out, 0, stream->num_out, off, 1);
+	ret = cdns_allocate_pdi(cdns, &stream->out, 0,
+				stream->num_out, offset);
 	if (ret)
 		goto pcm_error;
 
@@ -760,20 +763,23 @@ int sdw_cdns_pdi_init(struct sdw_cdns *cdns,
 
 	/* Allocate PDIs for PDMs */
 	stream = &cdns->pdm;
-	off = CDNS_PDM_PDI_OFFSET;
-	ret = cdns_allocate_pdi(cdns, &stream->bd, 0, stream->num_bd, off, 0);
+	offset = CDNS_PDM_PDI_OFFSET;
+	ret = cdns_allocate_pdi(cdns, &stream->bd, 0,
+				stream->num_bd, offset);
 	if (ret)
 		goto pdm_error;
 
-	off += stream->num_bd;
+	offset += stream->num_bd;
 
-	ret = cdns_allocate_pdi(cdns, &stream->in, 0, stream->num_in, off, 0);
+	ret = cdns_allocate_pdi(cdns, &stream->in, 0,
+				stream->num_in, offset);
 	if (ret)
 		goto pdm_error;
 
-	off += stream->num_in;
+	offset += stream->num_in;
 
-	ret = cdns_allocate_pdi(cdns, &stream->out, 0, stream->num_out, off, 0);
+	ret = cdns_allocate_pdi(cdns, &stream->out, 0,
+				stream->num_out, offset);
 	if (ret)
 		goto pdm_error;
 
@@ -783,12 +789,14 @@ int sdw_cdns_pdi_init(struct sdw_cdns *cdns,
 
 	cdns->ports = devm_kcalloc(cdns->dev, cdns->num_ports,
 				sizeof(*cdns->ports), GFP_KERNEL);
-	if (!cdns->ports)
+	if (!cdns->ports) {
+		ret = -ENOMEM;
 		goto pdm_error;
+	}
 
 	for (i = 0; i < cdns->num_ports; i++) {
 		cdns->ports[i].assigned = false;
-		cdns->ports[i].num = i + 1;
+		cdns->ports[i].num = i + 1; /* Port 0 reserved for bulk */
 	}
 
 	return 0;
@@ -873,6 +881,11 @@ int cdns_bus_conf(struct sdw_bus *bus, struct sdw_bus_params *params)
 	struct sdw_cdns *cdns = bus_to_cdns(bus);
 	int mcp_clkctrl_off, mcp_clkctrl;
 	int divider;
+
+	if (!params->curr_dr_freq) {
+		dev_err(cdns->dev, "NULL curr_dr_freq");
+		return -EINVAL;
+	}
 
 	divider	= (params->max_dr_freq / params->curr_dr_freq) - 1;
 
