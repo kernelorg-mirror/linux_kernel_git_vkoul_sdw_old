@@ -768,6 +768,7 @@ struct sdw_master_ops {
  * @sysfs: Bus sysfs
  * is used to compute and program bus bandwidth, clock, frame shape,
  * transport and port parameters
+ * @multi_link: if multi links are supported
  * @defer_msg: Defer message
  * @clk_stop_timeout: Clock stop timeout computed
  * @bank_switch_timeout: Bank switch timeout computed
@@ -786,6 +787,7 @@ struct sdw_bus {
 	struct sdw_master_prop prop;
 	struct list_head m_rt_list;
 	struct sdw_master_sysfs *sysfs;
+	bool multi_link;
 	struct sdw_defer defer_msg;
 	unsigned int clk_stop_timeout;
 	u32 bank_switch_timeout;

@@ -641,6 +641,7 @@ static int sdw_bank_switch(struct sdw_bus *bus)
 	if (!wr_msg)
 		return -ENOMEM;
 
+	bus->defer_msg.msg = wr_msg;
 	wbuf = kzalloc(sizeof(*wbuf), GFP_KERNEL);
 	if (!wbuf) {
 		ret = -ENOMEM;
@@ -661,17 +662,23 @@ static int sdw_bank_switch(struct sdw_bus *bus)
 					SDW_MSG_FLAG_WRITE, wbuf);
 	wr_msg->ssp_sync = true;
 
-	ret = sdw_transfer(bus, wr_msg);
+	if (bus->multi_link)
+		ret = sdw_transfer_defer(bus, wr_msg, &bus->defer_msg);
+	else
+		ret = sdw_transfer(bus, wr_msg);
+
 	if (ret < 0) {
 		dev_err(bus->dev, "Slave frame_ctrl reg write failed");
 		goto error;
 	}
 
-	kfree(wr_msg);
-	kfree(wbuf);
-	bus->defer_msg.msg = NULL;
-	bus->params.curr_bank = !bus->params.curr_bank;
-	bus->params.next_bank = !bus->params.next_bank;
+	if (!bus->multi_link) {
+		kfree(wr_msg);
+		kfree(wbuf);
+		bus->defer_msg.msg = NULL;
+		bus->params.curr_bank = !bus->params.curr_bank;
+		bus->params.next_bank = !bus->params.next_bank;
+	}
 
 	return 0;
 
