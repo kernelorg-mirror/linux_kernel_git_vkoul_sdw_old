@@ -4,6 +4,8 @@
 #ifndef __SDW_BUS_H
 #define __SDW_BUS_H
 
+#include <trace/events/sdw.h>
+
 #if IS_ENABLED(CONFIG_ACPI)
 int sdw_acpi_find_slaves(struct sdw_bus *bus);
 #else
@@ -15,6 +17,8 @@ static inline int sdw_acpi_find_slaves(struct sdw_bus *bus)
 
 void sdw_extract_slave_id(struct sdw_bus *bus,
 			u64 addr, struct sdw_slave_id *id);
+
+extern const struct attribute_group *sdw_slave_dev_attr_groups[];
 
 enum {
 	SDW_MSG_FLAG_READ = 0,
@@ -118,6 +122,9 @@ struct sdw_dpn_prop *sdw_get_slave_dpn_prop(struct sdw_slave *slave,
 int sdw_configure_dpn_intr(struct sdw_slave *slave, int port,
 					bool enable, int mask);
 
+int sdw_transfer_trace_reg(void);
+void sdw_transfer_trace_unreg(void);
+
 int sdw_transfer(struct sdw_bus *bus, struct sdw_msg *msg);
 int sdw_transfer_defer(struct sdw_bus *bus, struct sdw_msg *msg,
 				struct sdw_defer *defer);
@@ -157,6 +164,8 @@ static inline void sdw_fill_xport_params(struct sdw_transport_params *params,
 	params->blk_pkg_mode = pack_mode;
 	params->lane_ctrl = lane_ctrl;
 
+	/* Tracing for transport parameters */
+	trace_sdw_xport_params(params);
 
 }
 
@@ -170,6 +179,9 @@ static inline void sdw_fill_port_params(struct sdw_port_params *params,
 	params->bps = bps;
 	params->flow_mode = flow_mode;
 	params->data_mode = data_mode;
+
+	/* Tracing for transport parameters */
+	trace_sdw_port_params(params);
 
 }
 

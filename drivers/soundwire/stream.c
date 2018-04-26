@@ -15,6 +15,9 @@
 #include <linux/soundwire/sdw.h>
 #include "bus.h"
 
+#define CREATE_TRACE_POINTS
+#include <trace/events/sdw.h>
+
 /*
  * Array of supported rows and columns as per MIPI SoundWire Specification 1.1
  *
@@ -948,6 +951,8 @@ int sdw_stream_remove_slave(struct sdw_slave *slave,
 	sdw_release_slave_stream(slave, stream);
 
 	mutex_unlock(&slave->bus->bus_lock);
+//	trace_sdw_config_stream(&slave->bus, slave,
+//				stream_config, stream->name);
 
 	return 0;
 }
@@ -1125,6 +1130,12 @@ int sdw_stream_add_master(struct sdw_bus *bus,
 
 	stream->state = SDW_STREAM_CONFIGURED;
 
+//	for (i = 0; i < ports_config->count; i++)
+//		trace_sdw_config_ports(bus, slave,
+//				&ports_config->port_config[i], stream->name);
+
+	goto error;
+
 stream_error:
 	sdw_release_master_stream(stream);
 error:
@@ -1286,6 +1297,7 @@ static int _sdw_prepare_stream(struct sdw_stream_runtime *stream)
 		return ret;
 	}
 
+	trace_sdw_bus_params(bus);
 	stream->state = SDW_STREAM_PREPARED;
 
 	return ret;
@@ -1342,6 +1354,7 @@ static int _sdw_enable_stream(struct sdw_stream_runtime *stream)
 		return ret;
 	}
 
+	trace_sdw_bus_params(bus);
 	ret = do_bank_switch(stream);
 	if (ret < 0) {
 		dev_err(bus->dev, "Bank switch failed: %d", ret);
@@ -1401,6 +1414,7 @@ static int _sdw_disable_stream(struct sdw_stream_runtime *stream)
 		return ret;
 	}
 
+	trace_sdw_bus_params(bus);
 	return do_bank_switch(stream);
 }
 
@@ -1467,6 +1481,7 @@ static int _sdw_deprepare_stream(struct sdw_stream_runtime *stream)
 		return ret;
 	}
 
+	trace_sdw_bus_params(bus);
 	return do_bank_switch(stream);
 }
 

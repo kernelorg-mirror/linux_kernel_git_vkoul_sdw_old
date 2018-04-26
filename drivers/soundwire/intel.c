@@ -10,6 +10,7 @@
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
 #include <sound/pcm_params.h>
+#include <linux/pm_runtime.h>
 #include <sound/soc.h>
 #include <linux/soundwire/sdw_registers.h>
 #include <linux/soundwire/sdw.h>
@@ -163,6 +164,35 @@ static int intel_set_bit(void __iomem *base, int offset, u32 value, u32 mask)
 /*
  * shim ops
  */
+static int intel_link_power_down(struct sdw_intel *sdw)
+{
+	int link_control, spa_mask, cpa_mask, ret;
+	unsigned int link_id = sdw->instance;
+	void __iomem *shim = sdw->res->shim;
+	u16 ioctl;
+
+	/* Glue logic */
+	ioctl = intel_readw(shim, SDW_SHIM_IOCTL(link_id));
+	ioctl |= SDW_SHIM_IOCTL_BKE;
+	ioctl |= SDW_SHIM_IOCTL_COE;
+	intel_writew(shim, SDW_SHIM_IOCTL(link_id), ioctl);
+
+	ioctl &= ~(SDW_SHIM_IOCTL_MIF);
+	intel_writew(shim, SDW_SHIM_IOCTL(link_id), ioctl);
+
+	/* Link power down sequence */
+	link_control = intel_readl(shim, SDW_SHIM_LCTL);
+	spa_mask = ~(SDW_SHIM_LCTL_SPA << link_id);
+	cpa_mask = (SDW_SHIM_LCTL_CPA << link_id);
+	link_control &=  spa_mask;
+
+	ret = intel_clear_bit(shim, SDW_SHIM_LCTL, link_control, cpa_mask);
+	if (ret < 0)
+		return ret;
+
+	sdw->cdns.link_up = false;
+	return 0;
+}
 
 static int intel_link_power_up(struct sdw_intel *sdw)
 {
@@ -183,6 +213,29 @@ static int intel_link_power_up(struct sdw_intel *sdw)
 
 	sdw->cdns.link_up = true;
 	return 0;
+}
+
+static void intel_shim_wake(struct sdw_intel *sdw, bool wake_enable)
+{
+	void __iomem *shim = sdw->res->shim;
+	unsigned int link_id = sdw->instance;
+	u16 wake_en, wake_sts;
+
+	if (wake_enable) {
+		/* Enable the wakeup */
+		intel_writew(shim, SDW_SHIM_WAKEEN,
+					(SDW_SHIM_WAKEEN_ENABLE << link_id));
+	} else {
+		/* Disable the wake up interrupt */
+		wake_en = intel_readw(shim, SDW_SHIM_WAKEEN);
+		wake_en &= ~(SDW_SHIM_WAKEEN_ENABLE << link_id);
+		intel_writew(shim, SDW_SHIM_WAKEEN, wake_en);
+
+		/* Clear wake status */
+		wake_sts = intel_readw(shim, SDW_SHIM_WAKESTS);
+		wake_sts |= (SDW_SHIM_WAKEEN_ENABLE << link_id);
+		intel_writew(shim, SDW_SHIM_WAKESTS_STATUS, wake_sts);
+	}
 }
 
 static int intel_shim_init(struct sdw_intel *sdw)
@@ -282,6 +335,15 @@ intel_pdi_get_ch_cap(struct sdw_intel *sdw, unsigned int pdi_num, bool pcm)
 
 	if (pcm) {
 		count = intel_readw(shim, SDW_SHIM_PCMSYCHC(link_id, pdi_num));
+
+		/*
+		 * TODO: pdi number 2 reports channel count as 1 even though
+		 * it supports 8 channel. Performing hardcoding for pdi
+		 * number 2.
+		 */
+		if (pdi_num == 2)
+			count = 7;
+
 	} else {
 		count = intel_readw(shim, SDW_SHIM_PDMSCAP(link_id));
 		count = ((count & SDW_SHIM_PDMSCAP_CPSS) >>
@@ -591,8 +653,55 @@ static int intel_pdm_set_sdw_stream(struct snd_soc_dai *dai,
 	return cdns_set_sdw_stream(dai, stream, false, direction);
 }
 
+static int intel_trigger(struct snd_pcm_substream *substream,
+			int cmd, struct snd_soc_dai *dai)
+{
+
+	struct sdw_cdns *cdns = snd_soc_dai_get_drvdata(dai);
+	struct sdw_intel *sdw = cdns_to_intel(cdns);
+	struct sdw_cdns_dma_data *dma;
+	struct sdw_cdns_port *port = NULL;
+	int i;
+
+	dma = snd_soc_dai_get_dma_data(dai, substream);
+	if (!dma)
+		return -EIO;
+
+	/* TODO: add support for snd_pcm_link() later */
+
+	switch (cmd) {
+	case SNDRV_PCM_TRIGGER_START:
+	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+	case SNDRV_PCM_TRIGGER_RESUME:
+
+		/*
+		 * Workaround to fix first playback/capture noise issue
+		 * TODO: Remove this when fix is done in firmware.
+		 */
+		if (dma->stream_type == SDW_STREAM_PCM) {
+			for (i = 0; i < dma->nr_ports; i++) {
+				port = dma->port[i];
+				intel_pdi_alh_configure(sdw, port->pdi);
+			}
+		}
+
+		break;
+
+	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+	case SNDRV_PCM_TRIGGER_SUSPEND:
+	case SNDRV_PCM_TRIGGER_STOP:
+		break;
+
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 static struct snd_soc_dai_ops intel_pcm_dai_ops = {
 	.hw_params = intel_hw_params,
+	.trigger = intel_trigger,
 	.hw_free = intel_hw_free,
 	.shutdown = sdw_cdns_shutdown,
 	.set_sdw_stream = intel_pcm_set_sdw_stream,
@@ -600,6 +709,7 @@ static struct snd_soc_dai_ops intel_pcm_dai_ops = {
 
 static struct snd_soc_dai_ops intel_pdm_dai_ops = {
 	.hw_params = intel_hw_params,
+	.trigger = intel_trigger,
 	.hw_free = intel_hw_free,
 	.shutdown = sdw_cdns_shutdown,
 	.set_sdw_stream = intel_pdm_set_sdw_stream,
@@ -732,14 +842,18 @@ static int intel_prop_read(struct sdw_bus *bus)
 	sdw_master_read_prop(bus);
 
 	/* BIOS is not giving some values correctly. So, lets override them */
+	bus->prop.max_freq = 12000000;
+	bus->prop.num_clk_gears = 0;
+	bus->prop.clk_gears = NULL;
 	bus->prop.num_freq = 1;
-	bus->prop.freq = devm_kcalloc(bus->dev, sizeof(*bus->prop.freq),
-					bus->prop.num_freq, GFP_KERNEL);
+	bus->prop.freq = devm_kcalloc(bus->dev, bus->prop.num_freq,
+				sizeof(*bus->prop.freq), GFP_KERNEL);
 	if (!bus->prop.freq)
 		return -ENOMEM;
 
 	bus->prop.freq[0] = bus->prop.max_freq;
-	bus->prop.err_threshold = 5;
+	bus->prop.err_threshold = 0;
+	bus->prop.clk_stop_mode = SDW_CLK_STOP_MODE0 | SDW_CLK_STOP_MODE1;
 
 	return 0;
 }
@@ -803,6 +917,8 @@ static int intel_probe(struct platform_device *pdev)
 		goto err_init;
 
 	ret = sdw_cdns_enable_interrupt(&sdw->cdns);
+	if (ret)
+		goto err_init;
 
 	/* Read the PDI config and initialize cadence PDI */
 	intel_pdi_init(sdw, &config);
@@ -830,6 +946,11 @@ static int intel_probe(struct platform_device *pdev)
 		goto err_dai;
 	}
 
+	/* Enable PM */
+	pm_runtime_set_autosuspend_delay(&pdev->dev, 3000);
+	pm_runtime_use_autosuspend(&pdev->dev);
+	pm_runtime_enable(&pdev->dev);
+
 	return 0;
 
 err_dai:
@@ -853,11 +974,108 @@ static int intel_remove(struct platform_device *pdev)
 	return 0;
 }
 
+/*
+ * PM calls
+ */
+
+#ifdef CONFIG_PM
+
+static int intel_suspend(struct device *dev)
+{
+	struct sdw_intel *sdw;
+	int ret;
+
+	sdw = dev_get_drvdata(dev);
+
+	/*
+	 * TODO: Detect Lucid sleep/S0ix scenario
+	 * and take action accordingly.
+	 * Following to be done in suspend routine.
+	 * 1. Check whether system is going in S3 or S0i3
+	 * This can be done using acpi_target_system_state API.
+	 * 2. If system is going into S3, perform complete suspend flow,
+	 * suspend streams if running, mark clockstop modes for all
+	 * slaves and go to D3.
+	 * 3. If system is going in S0i3.
+	 *	a. Close the streams running with ignore_suspend set to
+	 *	false. Ideally the machine driver pm_suspend should take
+	 *	sure of same from ASOC core.
+	 *	b. If stream is running with ignore_suspend set to true,
+	 *	find out whether WOV is running in DSP or Codec. If WOV
+	 *	is running in DSP, keep clock running and return success
+	 *	for pm_suspend routine. If WOV is running in CODEC,
+	 *	perform clock stop operation, the codec running WOV will
+	 *	mark clockstop mode0 and return success for pm_suspend
+	 *	routine.
+	 * Note that all the drivers should take appropraite actions
+	 * (codec driver, machine driver, Master driver and platform
+	 * driver).
+	 */
+	ret = sdw_cdns_suspend(&sdw->cdns);
+	if (ret)
+		return ret;
+
+	/* Power down shim and set wake enable */
+	ret = intel_link_power_down(sdw);
+	if (ret) {
+		dev_err(dev, "Link power down failed: %d", ret);
+		return ret;
+	}
+
+	intel_shim_wake(sdw, true);
+
+	return 0;
+}
+
+static int intel_resume(struct device *dev)
+{
+	struct sdw_intel *sdw;
+	bool resume;
+	int ret;
+
+	sdw = dev_get_drvdata(dev);
+
+	resume = sdw_cdns_check_resume_status(&sdw->cdns);
+	if (resume)
+		return 0; /* it's already running */
+
+	/* Invoke shim for wake disable */
+	intel_shim_wake(sdw, false);
+
+	/* Initialize shim and controller */
+	ret = intel_link_power_up(sdw);
+	if (ret) {
+		dev_err(dev, "Link power up failed: %d", ret);
+		return ret;
+	}
+
+	ret = intel_shim_init(sdw);
+	if (ret) {
+		dev_err(dev, "Shim initialization failed: %d", ret);
+		return ret;
+	}
+
+	/* Initialize the cadence */
+	sdw_cdns_init(&sdw->cdns);
+	sdw_cdns_enable_interrupt(&sdw->cdns);
+
+	ret = sdw_bus_exit_clk_stop(&sdw->cdns.bus);
+
+	return ret;
+}
+
+#endif
+
+static const struct dev_pm_ops intel_pm = {
+	SET_RUNTIME_PM_OPS(intel_suspend, intel_resume, NULL)
+};
+
 static struct platform_driver sdw_intel_drv = {
 	.probe = intel_probe,
 	.remove = intel_remove,
 	.driver = {
 		.name = "int-sdw",
+		.pm = &intel_pm,
 
 	},
 };

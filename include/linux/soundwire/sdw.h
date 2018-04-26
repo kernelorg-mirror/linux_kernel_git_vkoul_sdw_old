@@ -398,6 +398,19 @@ struct sdw_master_prop {
 
 int sdw_master_read_prop(struct sdw_bus *bus);
 int sdw_slave_read_prop(struct sdw_slave *slave);
+int sdw_slave_read_dpn(struct sdw_slave *slave,
+		struct sdw_dpn_prop *dpn, int count, int ports, char *type);
+
+/*
+ * SDW sysfs APIs
+ */
+struct sdw_slave_sysfs;
+struct sdw_master_sysfs;
+
+int sdw_sysfs_bus_init(struct sdw_bus *bus);
+void sdw_sysfs_bus_exit(struct sdw_bus *bus);
+int sdw_sysfs_slave_init(struct sdw_slave *slave);
+void sdw_sysfs_slave_exit(struct sdw_slave *slave);
 
 /*
  * SDW Slave Structures and APIs
@@ -440,6 +453,21 @@ struct sdw_slave_intr_status {
 enum sdw_reg_bank {
 	SDW_BANK0,
 	SDW_BANK1,
+};
+
+/**
+ * enum sdw_clk_stop_type: clock stop operations
+ *
+ * @SDW_CLK_PRE_PREPARE: pre clock stop prepare
+ * @SDW_CLK_POST_PREPARE: post clock stop prepare
+ * @SDW_CLK_PRE_DEPREPARE: pre clock stop de-prepare
+ * @SDW_CLK_POST_DEPREPARE: post clock stop de-prepare
+ */
+enum sdw_clk_stop_type {
+	SDW_CLK_PRE_PREPARE = 0,
+	SDW_CLK_POST_PREPARE,
+	SDW_CLK_PRE_DEPREPARE,
+	SDW_CLK_POST_DEPREPARE,
 };
 
 /**
@@ -517,6 +545,8 @@ struct sdw_bus_params {
  * @interrupt_callback: Device interrupt notification (invoked in thread
  * context)
  * @update_status: Update Slave status
+ * @get_clk_stop_mode: Query the clock mode to be entered
+ * @clk_stop: Clock stop callback
  * @bus_config: Update the bus config for Slave
  * @port_prep: Prepare the port with parameters
  */
@@ -526,6 +556,10 @@ struct sdw_slave_ops {
 			struct sdw_slave_intr_status *status);
 	int (*update_status)(struct sdw_slave *slave,
 			enum sdw_slave_status status);
+	int (*get_clk_stop_mode)(struct sdw_slave *slave);
+	int (*clk_stop)(struct sdw_slave *slave,
+			enum sdw_clk_stop_mode mode,
+			enum sdw_clk_stop_type type);
 	int (*bus_config)(struct sdw_slave *slave,
 			struct sdw_bus_params *params);
 	int (*port_prep)(struct sdw_slave *slave,
@@ -541,8 +575,10 @@ struct sdw_slave_ops {
  * @bus: Bus handle
  * @ops: Slave callback ops
  * @prop: Slave properties
+ * @sysfs: Sysfs interface
  * @node: node for bus list
  * @port_ready: Port ready completion flag for each Slave port
+ * @curr_clk_stop_mode: Current clock stop mode
  * @dev_num: Device Number assigned by Bus
  */
 struct sdw_slave {
@@ -552,8 +588,10 @@ struct sdw_slave {
 	struct sdw_bus *bus;
 	const struct sdw_slave_ops *ops;
 	struct sdw_slave_prop prop;
+	struct sdw_slave_sysfs *sysfs;
 	struct list_head node;
 	struct completion *port_ready;
+	enum sdw_clk_stop_mode curr_clk_stop_mode;
 	u16 dev_num;
 };
 
@@ -727,6 +765,7 @@ struct sdw_master_ops {
  * @params: Current bus parameters
  * @prop: Master properties
  * @m_rt_list: List of Master instance of all stream(s) running on Bus. This
+ * @sysfs: Bus sysfs
  * is used to compute and program bus bandwidth, clock, frame shape,
  * transport and port parameters
  * @defer_msg: Defer message
@@ -746,6 +785,7 @@ struct sdw_bus {
 	struct sdw_bus_params params;
 	struct sdw_master_prop prop;
 	struct list_head m_rt_list;
+	struct sdw_master_sysfs *sysfs;
 	struct sdw_defer defer_msg;
 	unsigned int clk_stop_timeout;
 	u32 bank_switch_timeout;
@@ -856,6 +896,10 @@ int sdw_prepare_stream(struct sdw_stream_runtime *stream);
 int sdw_enable_stream(struct sdw_stream_runtime *stream);
 int sdw_disable_stream(struct sdw_stream_runtime *stream);
 int sdw_deprepare_stream(struct sdw_stream_runtime *stream);
+
+int sdw_bus_prep_clk_stop(struct sdw_bus *bus);
+int sdw_bus_clk_stop(struct sdw_bus *bus);
+int sdw_bus_exit_clk_stop(struct sdw_bus *bus);
 
 /* messaging and data APIs */
 

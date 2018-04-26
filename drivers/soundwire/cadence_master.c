@@ -223,6 +223,23 @@ static int cdns_clear_bit(struct sdw_cdns *cdns, int offset, u32 value)
 	return -EAGAIN;
 }
 
+static int cdns_set_wait(struct sdw_cdns *cdns, int offset, u32 value)
+{
+	int timeout = 10;
+	u32 reg_read;
+
+	/* Wait for bit to be self cleared */
+	do {
+		reg_read = readl(cdns->registers + offset);
+		if (reg_read & value)
+			return 0;
+
+		timeout--;
+		udelay(50);
+	} while (timeout != 0);
+
+	return -EAGAIN;
+}
 /*
  * IO Calls
  */
@@ -986,6 +1003,64 @@ int sdw_cdns_probe(struct sdw_cdns *cdns)
 	return 0;
 }
 EXPORT_SYMBOL(sdw_cdns_probe);
+
+/**
+ * sdw_cdns_suspend: Cadence PM suspend routine
+ *
+ * @cdns: Cadence instance
+ */
+int sdw_cdns_suspend(struct sdw_cdns *cdns)
+{
+	u32 status;
+	int ret;
+
+	/* Check suspend status */
+	status = cdns_readl(cdns, CDNS_MCP_STAT);
+	if (status & CDNS_MCP_STAT_CLK_STOP) {
+		dev_dbg(cdns->dev, "Clock is already stopped\n");
+		return 1;
+	}
+
+	/* Disable block wakeup */
+	cdns_updatel(cdns, CDNS_MCP_CONTROL, CDNS_MCP_CONTROL_BLOCK_WAKEUP,
+					CDNS_MCP_CONTROL_BLOCK_WAKEUP);
+
+	/* Prepare slaves for clock stop */
+	ret = sdw_bus_prep_clk_stop(&cdns->bus);
+	if (ret < 0)
+		return ret;
+
+	/* Enter clock stop */
+	ret = sdw_bus_clk_stop(&cdns->bus);
+	if (ret < 0)
+		return ret;
+
+	ret = cdns_set_wait(cdns, CDNS_MCP_STAT, CDNS_MCP_STAT_CLK_STOP);
+	if (ret < 0)
+		dev_err(cdns->dev, "Clock stop failed\n");
+
+	return ret;
+}
+EXPORT_SYMBOL(sdw_cdns_suspend);
+
+/**
+ * sdw_cdns_check_resume_status: Check PM resume status
+ *
+ * @cdns: Cadence instance
+ */
+bool sdw_cdns_check_resume_status(struct sdw_cdns *cdns)
+{
+	u32 status;
+
+	status = cdns_readl(cdns, CDNS_MCP_STAT) & CDNS_MCP_STAT_CLK_STOP;
+	if (!status) {
+		dev_dbg(cdns->dev, "Clock is already running\n");
+		return true;
+	}
+
+	return false;
+}
+EXPORT_SYMBOL(sdw_cdns_check_resume_status);
 
 int cdns_set_sdw_stream(struct snd_soc_dai *dai,
 		void *stream, bool pcm, int direction)
