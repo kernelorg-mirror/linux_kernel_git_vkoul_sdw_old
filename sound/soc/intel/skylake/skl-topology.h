@@ -184,6 +184,8 @@ enum skl_dma_type {
 	SKL_DMA_DMIC_LINK_INPUT_CLASS = 0xB,
 	SKL_DMA_I2S_LINK_OUTPUT_CLASS = 0xC,
 	SKL_DMA_I2S_LINK_INPUT_CLASS = 0xD,
+	SKL_DMA_SDW_LINK_OUTPUT_CLASS = 0x10,
+	SKL_DMA_SDW_LINK_INPUT_CLASS = 0x11,
 };
 
 union skl_ssp_dma_node {
@@ -198,8 +200,8 @@ union skl_connector_node_id {
 	u32 val;
 	struct {
 		u32 vindex:8;
-		u32 dma_type:4;
-		u32 rsvd:20;
+		u32 dma_type:5;
+		u32 rsvd:19;
 	} node;
 };
 
@@ -251,6 +253,17 @@ struct skl_specific_cfg {
 	u32 param_id;
 	u32 caps_size;
 	u32 *caps;
+};
+
+struct skl_sdw_agg {
+	u32 alh_stream;
+	u32 ch_mask;
+} __packed;
+
+struct skl_sdw_cfg {
+	u32 gw_attrib;
+	u32 count;
+	struct skl_sdw_agg data[0];
 };
 
 enum skl_pipe_state {
@@ -403,6 +416,7 @@ struct skl_module_cfg {
 	u32 converter;
 	u32 vbus_id;
 	u32 mem_pages;
+	u32 sdw_stream_num;
 	enum d0i3_capability d0i3_caps;
 	u32 dma_buffer_size; /* in milli seconds */
 	struct skl_module_pin *m_in_pin;
@@ -454,10 +468,14 @@ static inline struct skl *get_skl_ctx(struct device *dev)
 	return ebus_to_skl(ebus);
 }
 
-int skl_tplg_be_update_params(struct snd_soc_dai *dai,
+int skl_tplg_be_update_params(struct device *dev, struct snd_soc_dai *dai,
 	struct skl_pipe_params *params);
 int skl_dsp_set_dma_control(struct skl_sst *ctx, u32 *caps,
 			u32 caps_size, u32 node_id);
+int skl_tplg_be_sdw_update_params(struct device *dev, struct snd_soc_dai *dai,
+				struct snd_pcm_substream *substream,
+				struct snd_pcm_hw_params *params, int pdi);
+
 void skl_tplg_set_be_dmic_config(struct snd_soc_dai *dai,
 	struct skl_pipe_params *params, int stream);
 int skl_tplg_init(struct snd_soc_platform *platform,
